@@ -1,0 +1,38 @@
+name: binius64
+
+on:
+  push:
+    branches: [main]
+    paths: ['binius64/**', '.github/workflows/binius64.yml']
+  pull_request:
+    paths: ['binius64/**', '.github/workflows/binius64.yml']
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: binius64
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: rewrite ssh to https for cargo deps
+        run: git config --global url."https://github.com/".insteadOf "ssh://git@github.com/"
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            binius64/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('binius64/Cargo.toml') }}
+          restore-keys: ${{ runner.os }}-cargo-
+
+      - name: cargo check
+        run: cargo check
+
+      - name: cargo test
+        run: cargo test --release

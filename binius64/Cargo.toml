@@ -1,0 +1,66 @@
+[package]
+name = "blind-xmss-binius64"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+
+[lib]
+name = "blind_xmss_binius64"
+path = "src/lib.rs"
+
+bench = false
+
+[[bin]]
+name = "blindsig"
+path = "src/bin/blindsig.rs"
+bench = false
+
+[dependencies]
+binius-circuits  = { git = "ssh://git@github.com/binius-zk/binius64.git" }
+binius-compute   = { git = "ssh://git@github.com/binius-zk/binius64.git" }
+binius-core      = { git = "ssh://git@github.com/binius-zk/binius64.git" }
+binius-field     = { git = "ssh://git@github.com/binius-zk/binius64.git" }
+binius-frontend  = { git = "ssh://git@github.com/binius-zk/binius64.git" }
+binius-hash      = { git = "ssh://git@github.com/binius-zk/binius64.git" }
+binius-iop       = { git = "ssh://git@github.com/binius-zk/binius64.git" }
+binius-iop-prover = { git = "ssh://git@github.com/binius-zk/binius64.git" }
+binius-ip        = { git = "ssh://git@github.com/binius-zk/binius64.git" }
+binius-ip-prover = { git = "ssh://git@github.com/binius-zk/binius64.git" }
+binius-math      = { git = "ssh://git@github.com/binius-zk/binius64.git" }
+binius-prover    = { git = "ssh://git@github.com/binius-zk/binius64.git" }
+binius-spartan-frontend = { git = "ssh://git@github.com/binius-zk/binius64.git" }
+binius-spartan-prover = { git = "ssh://git@github.com/binius-zk/binius64.git" }
+binius-spartan-verifier = { git = "ssh://git@github.com/binius-zk/binius64.git" }
+binius-transcript = { git = "ssh://git@github.com/binius-zk/binius64.git" }
+binius-utils     = { git = "ssh://git@github.com/binius-zk/binius64.git" }
+binius-verifier  = { git = "ssh://git@github.com/binius-zk/binius64.git" }
+
+anyhow  = "1"
+blake3  = "1"
+digest  = "0.11.2"
+
+rayon   = "1"
+
+rand                = "0.10"
+
+serde   = { version = "1", features = ["derive"] }
+bincode = "1"
+
+[dev-dependencies]
+hex = "0.4"
+
+[[bench]]
+name    = "bench"
+harness = false
+
+[profile.bench]
+opt-level = 3
+lto       = "thin"
+
+[profile.release]
+opt-level = 3
+lto       = "thin"
+debug     = false
+
+[profile.dev]
+opt-level = 1

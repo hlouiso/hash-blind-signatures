@@ -1,0 +1,32 @@
+name: kkw
+
+on:
+  push:
+    branches: [main]
+    paths: ['kkw/**', '.github/workflows/kkw.yml']
+  pull_request:
+    paths: ['kkw/**', '.github/workflows/kkw.yml']
+  workflow_dispatch:
+
+concurrency:
+  group: kkw-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install OpenMP (macOS)
+        if: runner.os == 'macOS'
+        run: brew install libomp
+
+      - name: Test
+        run: make -C kkw test
