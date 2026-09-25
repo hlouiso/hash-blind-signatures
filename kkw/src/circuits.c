@@ -23,6 +23,32 @@ static uint32_t mh_bit(const unsigned char *buf, size_t j)
     return (uint32_t)((buf[j / 8] >> (j % 8)) & 1u);
 }
 
+#include "pooled_chains.inc"
+#define POOL_VERIFY
+#include "pooled_chains.inc"
+#undef POOL_VERIFY
+
+int kkw_build_schedule(unsigned char input[W_END], const unsigned char m_hat[32],
+                       const unsigned char pk_seed[XMSS_PK_SEED_BYTES])
+{
+    unsigned char com[HM_COM_BYTES], d[32], mh[32], coords[XMSS_WOTS_LEN];
+    hm_commit(m_hat, input + W_R_OFF, input + W_A_OFF, com, d);
+    uint32_t epoch = 0;
+    for (int b = 0; b < XMSS_EPOCH_BYTES; b++)
+        epoch = (epoch << 8) | input[W_LEAFIDX_OFF + b];
+    xmss_hash_message(pk_seed, epoch, input + W_NONCE_OFF, XMSS_NONCE_LEN,
+                       d, sizeof d, mh);
+    if (!xmss_extract_coords(mh, coords)) return 0;
+    int slot = 0;
+    for (int ci = 0; ci < XMSS_WOTS_LEN; ci++) {
+        for (int pos = coords[ci]; pos < XMSS_WOTS_MAX_STEPS; pos++) {
+            if (slot == W_SCHEDULE_LEN) return 0;
+            input[W_SCHEDULE_OFF + slot++] = (unsigned char)ci;
+        }
+    }
+    return slot == W_SCHEDULE_LEN;
+}
+
 static uint32_t shr32(uint32_t v, int k) { return k >= 32 ? 0u : v >> k; }
 
 static void put_idx_le(unsigned char *p, uint32_t idx)
@@ -57,64 +83,6 @@ static void mh_coord(const unsigned char mh_pub[32],
     for (int k = 0; k < XMSS_COORD_RES_BITS; k++) {
         out->h |= (bits[k].h & 1u) << k;
         for (int i = 0; i < N_PARTIES; i++) out->l[i] |= (bits[k].l[i] & 1u) << k;
-    }
-}
-
-static void chain_selectors(const mw bits[XMSS_COORD_RES_BITS],
-                            mw sel[XMSS_WOTS_MAX_STEPS],
-                            unsigned char *tapes[N_PARTIES], uint32_t *aux,
-                            uint32_t *s_all, int *gc)
-{
-    const mw *c0 = &bits[0], *c1 = &bits[1], *c2 = &bits[2];
-    mw nc0, nc1, nc2, lt2, b01, nb01, z00, nz00, ge5, ge6, eq7;
-
-    mpc_NEGATE(c0, &nc0);
-    mpc_NEGATE(c1, &nc1);
-    mpc_NEGATE(c2, &nc2);
-
-    mpc_AND(&nc1, &nc2, &lt2, tapes, aux, s_all, gc);
-    mpc_AND(&nc0, &lt2, &sel[0], tapes, aux, s_all, gc);
-    sel[1] = lt2;
-    mpc_AND(c0, c1, &b01, tapes, aux, s_all, gc);
-    mpc_NEGATE(&b01, &nb01);
-    mpc_AND(&nc2, &nb01, &sel[2], tapes, aux, s_all, gc);
-    sel[3] = nc2;
-    mpc_AND(&nc0, &nc1, &z00, tapes, aux, s_all, gc);
-    mpc_NEGATE(&z00, &nz00);
-    mpc_AND(c2, &nz00, &ge5, tapes, aux, s_all, gc);
-    mpc_NEGATE(&ge5, &sel[4]);
-    mpc_AND(c2, c1, &ge6, tapes, aux, s_all, gc);
-    mpc_NEGATE(&ge6, &sel[5]);
-    mpc_AND(&ge6, c0, &eq7, tapes, aux, s_all, gc);
-    mpc_NEGATE(&eq7, &sel[6]);
-}
-
-_Static_assert(XMSS_COORD_RES_BITS == 3 && XMSS_WOTS_MAX_STEPS == 7,
-               "chain_selectors implements the 3-bit digit of the unified "
-               "parameter set (xmss.h); a different width needs new formulas");
-
-static void mpc_mux_node(
-    unsigned char x_pub[XMSS_NODE_BYTES],
-    unsigned char x_lam[N_PARTIES][XMSS_NODE_BYTES],
-    const unsigned char h_pub[XMSS_NODE_BYTES],
-    unsigned char h_lam[N_PARTIES][XMSS_NODE_BYTES],
-    const mw *mask,
-    unsigned char *tapes[N_PARTIES], uint32_t *aux, uint32_t *s_all, int *gc)
-{
-    for (int w = 0; w < XMSS_NODE_WORDS; w++) {
-        mw xt, ht, t, mt;
-        xt.h = xmss_node_load_word(x_pub, (size_t)w);
-        ht.h = xmss_node_load_word(h_pub, (size_t)w);
-        for (int i = 0; i < N_PARTIES; i++) {
-            xt.l[i] = xmss_node_load_word(x_lam[i], (size_t)w);
-            ht.l[i] = xmss_node_load_word(h_lam[i], (size_t)w);
-        }
-        mpc_XOR(&xt, &ht, &t);
-        mpc_AND(mask, &t, &mt, tapes, aux, s_all, gc);
-        mpc_XOR(&xt, &mt, &xt);
-        xmss_node_store_word(x_pub, (size_t)w, xt.h);
-        for (int i = 0; i < N_PARTIES; i++)
-            xmss_node_store_word(x_lam[i], (size_t)w, xt.l[i]);
     }
 }
 
@@ -254,51 +222,11 @@ void building_views(
 
     unsigned char pkh_pub[XMSS_WOTS_LEN * XMSS_NODE_BYTES];
     unsigned char pkh_lam[N_PARTIES][XMSS_WOTS_LEN * XMSS_NODE_BYTES];
-    {
-        for (int ci = 0; ci < XMSS_WOTS_LEN; ci++) {
-            unsigned char x_pub[XMSS_NODE_BYTES], x_lam[N_PARTIES][XMSS_NODE_BYTES];
-            memcpy(x_pub, d_pub + W_SIG_OFF + ci * XMSS_NODE_BYTES, XMSS_NODE_BYTES);
-            for (int i = 0; i < N_PARTIES; i++)
-                memcpy(x_lam[i], lam[i] + W_SIG_OFF + ci * XMSS_NODE_BYTES, XMSS_NODE_BYTES);
-
-            mw cbits[XMSS_COORD_RES_BITS], sels[XMSS_WOTS_MAX_STEPS];
-            mh_coord_bits(mh_pub, mh_lam, ci, cbits);
-            chain_selectors(cbits, sels, tapes, aux, s_all, &gc);
-
-            for (int stage = 0; stage < XMSS_WOTS_MAX_STEPS; stage++) {
-                unsigned char h_pub[XMSS_NODE_BYTES], h_lam[N_PARTIES][XMSS_NODE_BYTES];
-
-                const int tlen = XMSS_PK_SEED_BYTES + XMSS_EPOCH_BYTES + 2;
-                unsigned char tw_pub[XMSS_PK_SEED_BYTES + XMSS_EPOCH_BYTES + 2];
-                unsigned char twbuf[N_PARTIES][XMSS_PK_SEED_BYTES + XMSS_EPOCH_BYTES + 2];
-                unsigned char dom_pub[XMSS_NODE_BYTES + 1];
-                unsigned char dombuf[N_PARTIES][XMSS_NODE_BYTES + 1];
-                unsigned char *tw_lam[N_PARTIES], *domp[N_PARTIES], *outp[N_PARTIES];
-                memcpy(tw_pub, pk_seed, XMSS_PK_SEED_BYTES);
-                memcpy(tw_pub + XMSS_PK_SEED_BYTES, d_pub + W_LEAFIDX_OFF, XMSS_EPOCH_BYTES);
-                tw_pub[tlen - 2] = (unsigned char)ci;
-                tw_pub[tlen - 1] = (unsigned char)(stage + 1);
-                memcpy(dom_pub, x_pub, XMSS_NODE_BYTES);
-                dom_pub[XMSS_NODE_BYTES] = XMSS_TWEAK_CHAIN;
-                for (int i = 0; i < N_PARTIES; i++) {
-                    memset(twbuf[i], 0, tlen);
-                    memcpy(twbuf[i] + XMSS_PK_SEED_BYTES, lam[i] + W_LEAFIDX_OFF, XMSS_EPOCH_BYTES);
-                    memcpy(dombuf[i], x_lam[i], XMSS_NODE_BYTES);
-                    dombuf[i][XMSS_NODE_BYTES] = 0;
-                    tw_lam[i] = twbuf[i]; domp[i] = dombuf[i]; outp[i] = h_lam[i];
-                }
-                mpc_blake3_th(dom_pub, domp, XMSS_NODE_BYTES + 1, tw_pub, tw_lam, tlen,
-                              h_pub, outp, XMSS_NODE_BYTES, tapes, aux, s_all, &gc);
-                mw mask;
-                mask_from_bit(&sels[stage], &mask);
-                mpc_mux_node(x_pub, x_lam, h_pub, h_lam, &mask,
-                             tapes, aux, s_all, &gc);
-            }
-            memcpy(pkh_pub + ci * XMSS_NODE_BYTES, x_pub, XMSS_NODE_BYTES);
-            for (int i = 0; i < N_PARTIES; i++)
-                memcpy(pkh_lam[i] + ci * XMSS_NODE_BYTES, x_lam[i], XMSS_NODE_BYTES);
-        }
-    }
+    mw pool_check;
+    pool_context pool_ctx = { .tapes = tapes, .transcript = s_all, .gc = &gc,
+        .aux = aux };
+    pool_chains(d_pub, lam, pk_seed, mh_pub, mh_lam, pkh_pub, pkh_lam,
+                 &pool_check, &pool_ctx);
 
     unsigned char node_pub[XMSS_NODE_BYTES], node_lam[N_PARTIES][XMSS_NODE_BYTES];
     {
@@ -413,11 +341,13 @@ void building_views(
     }
     zh_out[YP_SUM_WORD] = acc.h;
     zh_out[YP_LEFTOVER_WORD] = leftover.h;
+    zh_out[YP_POOL_WORD] = pool_check.h;
     for (int i = 0; i < N_PARTIES; i++) {
         a->yp[i][YP_SUM_WORD] = acc.l[i];
         a->yp[i][YP_LEFTOVER_WORD] = leftover.l[i];
+        a->yp[i][YP_POOL_WORD] = pool_check.l[i];
     }
-    for (int w = YP_LEFTOVER_WORD + 1; w < 8; w++) {
+    for (int w = YP_POOL_WORD + 1; w < 8; w++) {
         zh_out[w] = 0;
         for (int i = 0; i < N_PARTIES; i++) a->yp[i][w] = 0;
     }
@@ -454,63 +384,6 @@ static void mh_coord_v(const unsigned char mh_pub[32],
     for (int k = 0; k < XMSS_COORD_RES_BITS; k++) {
         out->h |= (bits[k].h & 1u) << k;
         for (int p = 0; p < N_PARTIES-1; p++) out->l[p] |= (bits[k].l[p] & 1u) << k;
-    }
-}
-
-static void chain_selectors_v(const mwv bits[XMSS_COORD_RES_BITS],
-                              mwv sel[XMSS_WOTS_MAX_STEPS],
-                              unsigned char *tapes[N_PARTIES-1], int e,
-                              const uint32_t *msgs_e, const uint32_t *aux,
-                              uint32_t *s_slots, int *gc)
-{
-    const mwv *c0 = &bits[0], *c1 = &bits[1], *c2 = &bits[2];
-    mwv nc0, nc1, nc2, lt2, b01, nb01, z00, nz00, ge5, ge6, eq7;
-
-    mpc_NEGATE_v(c0, &nc0);
-    mpc_NEGATE_v(c1, &nc1);
-    mpc_NEGATE_v(c2, &nc2);
-
-    mpc_AND_verify(&nc1, &nc2, &lt2, tapes, e, msgs_e, aux, s_slots, gc);
-    mpc_AND_verify(&nc0, &lt2, &sel[0], tapes, e, msgs_e, aux, s_slots, gc);
-    sel[1] = lt2;
-    mpc_AND_verify(c0, c1, &b01, tapes, e, msgs_e, aux, s_slots, gc);
-    mpc_NEGATE_v(&b01, &nb01);
-    mpc_AND_verify(&nc2, &nb01, &sel[2], tapes, e, msgs_e, aux, s_slots, gc);
-    sel[3] = nc2;
-    mpc_AND_verify(&nc0, &nc1, &z00, tapes, e, msgs_e, aux, s_slots, gc);
-    mpc_NEGATE_v(&z00, &nz00);
-    mpc_AND_verify(c2, &nz00, &ge5, tapes, e, msgs_e, aux, s_slots, gc);
-    mpc_NEGATE_v(&ge5, &sel[4]);
-    mpc_AND_verify(c2, c1, &ge6, tapes, e, msgs_e, aux, s_slots, gc);
-    mpc_NEGATE_v(&ge6, &sel[5]);
-    mpc_AND_verify(&ge6, c0, &eq7, tapes, e, msgs_e, aux, s_slots, gc);
-    mpc_NEGATE_v(&eq7, &sel[6]);
-}
-
-static void mpc_mux_node_verify(
-    unsigned char x_pub[XMSS_NODE_BYTES],
-    unsigned char x_lam[N_PARTIES-1][XMSS_NODE_BYTES],
-    const unsigned char h_pub[XMSS_NODE_BYTES],
-    unsigned char h_lam[N_PARTIES-1][XMSS_NODE_BYTES],
-    const mwv *mask,
-    unsigned char *tapes[N_PARTIES-1], int e,
-    const uint32_t *msgs_e, const uint32_t *aux,
-    uint32_t *s_slots, int *gc)
-{
-    for (int w = 0; w < XMSS_NODE_WORDS; w++) {
-        mwv xt, ht, t, mt;
-        xt.h = xmss_node_load_word(x_pub, (size_t)w);
-        ht.h = xmss_node_load_word(h_pub, (size_t)w);
-        for (int j = 0; j < N_PARTIES-1; j++) {
-            xt.l[j] = xmss_node_load_word(x_lam[j], (size_t)w);
-            ht.l[j] = xmss_node_load_word(h_lam[j], (size_t)w);
-        }
-        mpc_XOR_v(&xt, &ht, &t);
-        mpc_AND_verify(mask, &t, &mt, tapes, e, msgs_e, aux, s_slots, gc);
-        mpc_XOR_v(&xt, &mt, &xt);
-        xmss_node_store_word(x_pub, (size_t)w, xt.h);
-        for (int j = 0; j < N_PARTIES-1; j++)
-            xmss_node_store_word(x_lam[j], (size_t)w, xt.l[j]);
     }
 }
 
@@ -675,51 +548,11 @@ void verify(
 
     unsigned char pkh_pub[XMSS_WOTS_LEN * XMSS_NODE_BYTES];
     unsigned char pkh_lam[N_PARTIES-1][XMSS_WOTS_LEN * XMSS_NODE_BYTES];
-    {
-        for (int ci = 0; ci < XMSS_WOTS_LEN; ci++) {
-            unsigned char x_pub[XMSS_NODE_BYTES], x_lam[N_PARTIES-1][XMSS_NODE_BYTES];
-            memcpy(x_pub, d_pub + W_SIG_OFF + ci * XMSS_NODE_BYTES, XMSS_NODE_BYTES);
-            for (int j = 0; j < N_PARTIES-1; j++)
-                memcpy(x_lam[j], vlam[j] + W_SIG_OFF + ci * XMSS_NODE_BYTES, XMSS_NODE_BYTES);
-
-            mwv cbits[XMSS_COORD_RES_BITS], sels[XMSS_WOTS_MAX_STEPS];
-            mh_coord_bits_v(mh_pub, mh_lam, ci, cbits);
-            chain_selectors_v(cbits, sels, tapes, e, msgs_e, z_proof->aux, s_slots, &gc);
-
-            for (int stage = 0; stage < XMSS_WOTS_MAX_STEPS; stage++) {
-                unsigned char h_pub[XMSS_NODE_BYTES], h_lam[N_PARTIES-1][XMSS_NODE_BYTES];
-                const int tlen = XMSS_PK_SEED_BYTES + XMSS_EPOCH_BYTES + 2;
-                unsigned char tw_pub[XMSS_PK_SEED_BYTES + XMSS_EPOCH_BYTES + 2];
-                unsigned char twbuf[N_PARTIES-1][XMSS_PK_SEED_BYTES + XMSS_EPOCH_BYTES + 2];
-                unsigned char dom_pub[XMSS_NODE_BYTES + 1];
-                unsigned char dombuf[N_PARTIES-1][XMSS_NODE_BYTES + 1];
-                unsigned char *tw_lam[N_PARTIES-1], *domp[N_PARTIES-1], *outp[N_PARTIES-1];
-                memcpy(tw_pub, pk_seed, XMSS_PK_SEED_BYTES);
-                memcpy(tw_pub + XMSS_PK_SEED_BYTES, d_pub + W_LEAFIDX_OFF, XMSS_EPOCH_BYTES);
-                tw_pub[tlen - 2] = (unsigned char)ci;
-                tw_pub[tlen - 1] = (unsigned char)(stage + 1);
-                memcpy(dom_pub, x_pub, XMSS_NODE_BYTES);
-                dom_pub[XMSS_NODE_BYTES] = XMSS_TWEAK_CHAIN;
-                for (int j = 0; j < N_PARTIES-1; j++) {
-                    memset(twbuf[j], 0, tlen);
-                    memcpy(twbuf[j] + XMSS_PK_SEED_BYTES, vlam[j] + W_LEAFIDX_OFF, XMSS_EPOCH_BYTES);
-                    memcpy(dombuf[j], x_lam[j], XMSS_NODE_BYTES);
-                    dombuf[j][XMSS_NODE_BYTES] = 0;
-                    tw_lam[j] = twbuf[j]; domp[j] = dombuf[j]; outp[j] = h_lam[j];
-                }
-                mpc_blake3_th_verify(dom_pub, domp, XMSS_NODE_BYTES + 1, tw_pub, tw_lam, tlen,
-                                     h_pub, outp, XMSS_NODE_BYTES,
-                                     tapes, e, msgs_e, z_proof->aux, s_slots, &gc);
-                mwv mask;
-                mask_from_bit_v(&sels[stage], &mask);
-                mpc_mux_node_verify(x_pub, x_lam, h_pub, h_lam, &mask,
-                                    tapes, e, msgs_e, z_proof->aux, s_slots, &gc);
-            }
-            memcpy(pkh_pub + ci * XMSS_NODE_BYTES, x_pub, XMSS_NODE_BYTES);
-            for (int j = 0; j < N_PARTIES-1; j++)
-                memcpy(pkh_lam[j] + ci * XMSS_NODE_BYTES, x_lam[j], XMSS_NODE_BYTES);
-        }
-    }
+    mwv pool_check;
+    pool_v_context pool_ctx = { .tapes = tapes, .transcript = s_slots, .gc = &gc,
+        .aux = z_proof->aux, .msgs_e = msgs_e, .e = e };
+    pool_v_chains(d_pub, vlam, pk_seed, mh_pub, mh_lam, pkh_pub, pkh_lam,
+                   &pool_check, &pool_ctx);
 
     unsigned char node_pub[XMSS_NODE_BYTES];
     unsigned char node_lam[N_PARTIES-1][XMSS_NODE_BYTES];
@@ -834,7 +667,8 @@ void verify(
         zh_out[w] = xmss_node_load_word(node_pub, (size_t)w);
     zh_out[YP_SUM_WORD] = sum.h;
     zh_out[YP_LEFTOVER_WORD] = leftover.h;
-    for (int w = YP_LEFTOVER_WORD + 1; w < 8; w++) zh_out[w] = 0;
+    zh_out[YP_POOL_WORD] = pool_check.h;
+    for (int w = YP_POOL_WORD + 1; w < 8; w++) zh_out[w] = 0;
 
     for (int j = 0; j < N_PARTIES-1; j++) {
         int o = (j < e) ? j : j + 1;
@@ -845,7 +679,8 @@ void verify(
         }
         if (sum.l[j] != a_struct->yp[o][YP_SUM_WORD]) { *error = true; }
         if (leftover.l[j] != a_struct->yp[o][YP_LEFTOVER_WORD]) { *error = true; }
-        for (int w = YP_LEFTOVER_WORD + 1; w < 8; w++)
+        if (pool_check.l[j] != a_struct->yp[o][YP_POOL_WORD]) { *error = true; }
+        for (int w = YP_POOL_WORD + 1; w < 8; w++)
             if (a_struct->yp[o][w] != 0) { *error = true; }
     }
 

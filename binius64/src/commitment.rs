@@ -1,7 +1,7 @@
 //! Halevi–Micali commitment over GF(2^128) with (n, s, k) = (128, 2, 6).
 //! Field elements use little-endian polynomial-basis encoding.
 
-use binius_field::BinaryField128bGhash;
+use binius_field::Ghash128b;
 
 use crate::hashes::blake3_256;
 
@@ -15,18 +15,18 @@ pub const N_LINES: usize = N_Y / N_FE;
 pub type GhashElement = [u8; N_FE];
 
 #[inline]
-fn field_from_bytes(value: &GhashElement) -> BinaryField128bGhash {
-    BinaryField128bGhash::new(u128::from_le_bytes(*value))
+fn field_from_bytes(value: &GhashElement) -> Ghash128b {
+    Ghash128b::new(u128::from_le_bytes(*value))
 }
 
 #[inline]
-fn field_to_bytes(value: BinaryField128bGhash) -> GhashElement {
+fn field_to_bytes(value: Ghash128b) -> GhashElement {
     u128::from(value).to_le_bytes()
 }
 
 #[inline]
 pub fn ghash_mul(a: u128, b: u128) -> u128 {
-    u128::from(BinaryField128bGhash::new(a) * BinaryField128bGhash::new(b))
+    u128::from(Ghash128b::new(a) * Ghash128b::new(b))
 }
 
 pub fn sample_ghash(rng: &mut impl rand::Rng) -> GhashElement {
@@ -117,7 +117,7 @@ pub fn hm_commit(
     let mut b = [[0u8; N_FE]; N_LINES];
 
     for k in 0..N_LINES {
-        let mut sum = BinaryField128bGhash::new(0);
+        let mut sum = Ghash128b::new(0);
         for i in 0..N_NONCE {
             sum += field_from_bytes(&a[k][i]) * field_from_bytes(&r[i]);
         }

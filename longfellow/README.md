@@ -14,5 +14,7 @@ Building requires CMake 3.14 or newer, a C++17 compiler, and OpenSSL.
 Longfellow ZK is fetched automatically by CMake.
 
 ```sh
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build -j
 ctest --test-dir build
 ```

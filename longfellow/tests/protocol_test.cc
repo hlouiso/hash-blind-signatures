@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <cstdio>
 #include <cstring>
 #include <memory>
@@ -13,6 +14,8 @@
 #include "circuits/sha/flatsha256_witness.h"
 #include "util/log.h"
 #include "util/panic.h"
+#include "util/readbuffer.h"
+#include "zk/zk_proof.h"
 
 #include "circuit/blind_stmt.h"
 #include "circuit_cache.h"
@@ -885,19 +888,53 @@ void test_protocol(Tally& t, const Field& F, const Circuit<Field>& circuit) {
            verify_blind_sig(F, circuit, xmss_root, key.pk_seed, bsig, message));
 
   {
-    BlindSignature bad_nonce = bsig;
-    bad_nonce.proof[0] ^= 0x01;
-    t.record("tampered Fiat-Shamir session nonce rejected",
-             !verify_blind_sig(F, circuit, xmss_root, key.pk_seed, bad_nonce,
+    proofs::ZkProof<Field> native(circuit, kLigeroRate, kLigeroNreq);
+    proofs::ReadBuffer rb(bsig.proof.data(), bsig.proof.size());
+    t.record("signature contains a bare native Longfellow proof",
+             native.read(rb, F) && rb.remaining() == 0);
+  }
+  {
+    const BlindSignature fresh = user_prove(F, circuit, state, *xmss_sig);
+    const size_t root_bytes = proofs::Digest::kLength;
+    t.record("repeated proving produces a fresh salted commitment",
+             bsig.proof.size() >= root_bytes &&
+                 fresh.proof.size() >= root_bytes &&
+                 !std::equal(bsig.proof.begin(), bsig.proof.begin() + root_bytes,
+                             fresh.proof.begin()));
+    t.record("fresh proof of the same statement verifies",
+             verify_blind_sig(F, circuit, xmss_root, key.pk_seed, fresh, message));
+  }
+  {
+    BlindSignature bad_root = bsig;
+    bad_root.proof[0] ^= 0x01;
+    t.record("tampered Ligero commitment root rejected",
+             !verify_blind_sig(F, circuit, xmss_root, key.pk_seed, bad_root,
                                message));
   }
   {
-    BlindSignature truncated;
-    truncated.proof.resize(kFsNonceBytes - 1);
-    t.record("truncated Fiat-Shamir nonce rejected",
+    BlindSignature prefixed = bsig;
+    prefixed.proof.insert(prefixed.proof.begin(), 32, 0);
+    t.record("legacy 32-byte nonce prefix rejected",
+             !verify_blind_sig(F, circuit, xmss_root, key.pk_seed, prefixed,
+                               message));
+  }
+  {
+    BlindSignature truncated = bsig;
+    truncated.proof.pop_back();
+    t.record("truncated native proof rejected",
              !verify_blind_sig(F, circuit, xmss_root, key.pk_seed, truncated,
                                message));
   }
+  {
+    BlindSignature trailing = bsig;
+    trailing.proof.push_back(0);
+    t.record("trailing proof bytes rejected",
+             !verify_blind_sig(F, circuit, xmss_root, key.pk_seed, trailing,
+                               message));
+  }
+  t.record("empty proof rejected",
+           !verify_blind_sig(F, circuit, xmss_root, key.pk_seed, BlindSignature{},
+                             message));
 
   proofs::set_log_level(proofs::ERROR);
 

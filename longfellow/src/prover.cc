@@ -220,16 +220,14 @@ std::vector<uint8_t> blind_prove(const Field& F,
   const RSFactory rsf(F);
   ZkProof<Field> zkpr(circuit, kLigeroRate, kLigeroNreq);
   SecureRandomEngine rng;
-  std::array<uint8_t, kFsNonceBytes> fs_nonce{};
-  rng.bytes(fs_nonce.data(), fs_nonce.size());
   Transcript tp(reinterpret_cast<const uint8_t*>(kDomainTag),
                 sizeof(kDomainTag) - 1, kTranscriptVersion);
-  tp.write(fs_nonce.data(), fs_nonce.size());
   ZkProver<Field, RSFactory> prover(circuit, F, rsf);
+  // The native salted Merkle root seeds the transcript before any challenge.
   prover.commit(zkpr, *W, tp, rng);
   if (!prover.prove(zkpr, *W, tp)) return {};
 
-  std::vector<uint8_t> buf(fs_nonce.begin(), fs_nonce.end());
+  std::vector<uint8_t> buf;
   zkpr.write(buf, F);
   return buf;
 }

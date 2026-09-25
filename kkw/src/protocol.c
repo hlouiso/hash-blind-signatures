@@ -135,6 +135,8 @@ int blind_user_prove(const blind_user_state *st, const uint8_t pk_seed[XMSS_PK_S
     for (int h = 0; h < XMSS_H; h++)
         memcpy(input + W_PATH_OFF + h * XMSS_NODE_BYTES, sig->auth_path[h], XMSS_NODE_BYTES);
 
+    if (!kkw_build_schedule(input, m_hat, pk_seed))
+        return -1;
     build_pubout(root, pubout);
     return kkw_prove(input, m_hat, pk_seed, pubout, out);
 }

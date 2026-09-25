@@ -24,9 +24,7 @@ constexpr size_t kLigeroRate = 7;
 constexpr size_t kLigeroNreq = 140;
 
 constexpr size_t kTranscriptVersion = 12;
-constexpr char kDomainTag[] = "blind-xmss-longfellow-v5-node184-nonce184-seed144";
-
-constexpr size_t kFsNonceBytes = 32;
+constexpr char kDomainTag[] = "blind-xmss-longfellow-v6-node184-nonce184-seed144";
 
 }
 

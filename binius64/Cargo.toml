@@ -22,6 +22,7 @@ binius-core      = { git = "ssh://git@github.com/binius-zk/binius64.git" }
 binius-field     = { git = "ssh://git@github.com/binius-zk/binius64.git" }
 binius-frontend  = { git = "ssh://git@github.com/binius-zk/binius64.git" }
 binius-hash      = { git = "ssh://git@github.com/binius-zk/binius64.git" }
+binius-hash-prover = { git = "ssh://git@github.com/binius-zk/binius64.git" }
 binius-iop       = { git = "ssh://git@github.com/binius-zk/binius64.git" }
 binius-iop-prover = { git = "ssh://git@github.com/binius-zk/binius64.git" }
 binius-ip        = { git = "ssh://git@github.com/binius-zk/binius64.git" }

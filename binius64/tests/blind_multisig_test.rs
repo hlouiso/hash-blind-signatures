@@ -51,10 +51,14 @@ fn blind_multisig_full_roundtrip() {
         .verify(&blind_sig, &message)
         .expect("honest blind multi-signature must verify");
 
-    blind_sig.proof[0] ^= 1;
-    verifier
-        .verify(&blind_sig, &message)
-        .expect_err("a modified multi-proof domain separator must be rejected");
+    let previous_label = b"blind-xmss-binius64-multisig-v6-salted-ghash";
+    blind_sig.proof[..previous_label.len()].copy_from_slice(previous_label);
+    assert!(matches!(
+        verifier.verify(&blind_sig, &message),
+        Err(BlindMultiSigError::Proof(
+            blind_xmss_binius64::protocol::verifier::UnifiedVerifyError::InvalidDomainSeparator
+        ))
+    ));
 }
 
 #[test]

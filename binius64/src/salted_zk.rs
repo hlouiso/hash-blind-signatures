@@ -10,8 +10,9 @@ use binius_core::{
     constraint_system::{InoutSegment, ValueVec},
     word::Word,
 };
-use binius_field::{BinaryField, BinaryField128bGhash as B128, Field, PackedField, Random};
-use binius_hash::{StdHashSuite, binary_merkle_tree::HashSuite};
+use binius_field::{BinaryField, Field, Ghash128b as B128, PackedField, Random};
+use binius_hash::{HashSuite, StdHashSuite};
+use binius_hash_prover::ParallelHashSuite;
 use binius_iop::{
     merkle_channel::{
         Error as MerkleChannelError, MerkleIPVerifierChannel, TranscriptMerkleCommitment,
@@ -30,8 +31,7 @@ use binius_math::{
     ntt::{NeighborsLastMultiThread, domain_context::GaoMateerPreExpanded},
 };
 use binius_prover::{
-    IOPProver, OptimalPackedB128, protocols::shift::build_key_collection,
-    zk_config::Error as ProverError,
+    IOPProver, OptimalPackedB128, protocols::shift::KeyCollection, zk_config::Error as ProverError,
 };
 use binius_spartan_frontend::constraint_system::WitnessLayout;
 use binius_spartan_prover::{
@@ -93,7 +93,7 @@ pub struct SaltedProverMerkleChannel<
     T,
     Challenger_,
     F,
-    H: HashSuite,
+    H: ParallelHashSuite,
     R,
     A: Allocator = GlobalAllocator,
 > {
@@ -104,13 +104,15 @@ pub struct SaltedProverMerkleChannel<
     _challenger_marker: PhantomData<Challenger_>,
 }
 
-impl<T, Challenger_, F, H: HashSuite, R> SaltedProverMerkleChannel<T, Challenger_, F, H, R> {
+impl<T, Challenger_, F, H: ParallelHashSuite, R>
+    SaltedProverMerkleChannel<T, Challenger_, F, H, R>
+{
     pub fn new(transcript: T, rng: R, salt_len: usize) -> Self {
         Self::with_merkle_prover(transcript, BinaryMerkleTreeProver::new(), rng, salt_len)
     }
 }
 
-impl<T, Challenger_, F, H: HashSuite, R, A: Allocator>
+impl<T, Challenger_, F, H: ParallelHashSuite, R, A: Allocator>
     SaltedProverMerkleChannel<T, Challenger_, F, H, R, A>
 {
     pub fn with_merkle_prover(
@@ -140,7 +142,7 @@ where
     F: Field,
     T: BorrowMut<ProverTranscript<Challenger_>>,
     Challenger_: Challenger,
-    H: HashSuite,
+    H: ParallelHashSuite,
     A: Allocator,
 {
     fn send_one(&mut self, elem: F) {
@@ -170,7 +172,7 @@ where
     F: Field,
     T: BorrowMut<ProverTranscript<Challenger_>>,
     Challenger_: Challenger,
-    H: HashSuite,
+    H: ParallelHashSuite,
     A: Allocator,
 {
     type Word = Word;
@@ -190,7 +192,7 @@ where
     F: Field + Random,
     T: BorrowMut<ProverTranscript<Challenger_>>,
     Challenger_: Challenger,
-    H: HashSuite,
+    H: ParallelHashSuite,
     R: Rng,
     A: Allocator,
     Output<H::LeafHash>: SerializeBytes,
@@ -468,7 +470,7 @@ pub struct SaltedZkProver {
 
 impl SaltedZkProver {
     pub fn setup(zk_verifier: &ZKVerifier<StdHashSuite>) -> Result<Self, ProverError> {
-        let key_collection = build_key_collection(
+        let key_collection = KeyCollection::build(
             zk_verifier.inner_iop_verifier().constraint_system(),
             InoutSegment::Public,
         );
@@ -588,7 +590,7 @@ pub fn verify_salted<Challenger_: Challenger>(
 
 #[cfg(test)]
 mod tests {
-    use binius_field::{BinaryField128bGhash as B128, PackedBinaryGhash2x128b, Random};
+    use binius_field::{Ghash128b as B128, PackedGhash2x128b, Random};
     use binius_hash::{StdDigest, StdHashSuite};
     use binius_math::FieldBuffer;
     use binius_transcript::{ProverTranscript, fiat_shamir::HasherChallenger};
@@ -597,7 +599,7 @@ mod tests {
     use super::*;
 
     type StdChallenger = HasherChallenger<StdDigest>;
-    type P = PackedBinaryGhash2x128b;
+    type P = PackedGhash2x128b;
     type ProverChannel<T, R> = SaltedProverMerkleChannel<T, StdChallenger, B128, StdHashSuite, R>;
     type VerifierChannel<T> = SaltedVerifierMerkleChannel<T, StdChallenger, B128, StdHashSuite>;
 
@@ -624,12 +626,12 @@ mod tests {
         let indices = {
             let mut prover_channel =
                 ProverChannel::new(&mut transcript, &mut rng, MERKLE_SALT_ELEMENTS);
-            let commitment = prover_channel.send_merkle_commitment(data.to_ref(), LEAF_SIZE);
+            let commitment = prover_channel.send_merkle_commitment(data.as_view(), LEAF_SIZE);
             let indices = (0..N_QUERIES)
                 .map(|_| WordIPProverChannel::<B128>::sample_bits(&mut prover_channel, DEPTH))
                 .collect::<Vec<_>>();
-            prover_channel.send_openings(&commitment, data.to_ref(), &indices);
-            prover_channel.send_committed_vector(&commitment, data.to_ref());
+            prover_channel.send_openings(&commitment, data.as_view(), &indices);
+            prover_channel.send_committed_vector(&commitment, data.as_view());
             indices
         };
 
@@ -669,7 +671,7 @@ mod tests {
             let mut transcript = ProverTranscript::new(StdChallenger::default());
             {
                 let mut channel = ProverChannel::new(&mut transcript, rng, MERKLE_SALT_ELEMENTS);
-                channel.send_merkle_commitment(data.to_ref(), LEAF_SIZE);
+                channel.send_merkle_commitment(data.as_view(), LEAF_SIZE);
             }
             transcript.finalize()
         };

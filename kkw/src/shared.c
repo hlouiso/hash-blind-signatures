@@ -8,9 +8,10 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define YSIZE_GATES 123410
+/* 23114 non-chain gates + 99 * 711 pooled-step gates + 11 final checks. */
+#define YSIZE_GATES 93514
 const int ySize = YSIZE_GATES;
-const int INPUT_LEN = 1500;
+const int INPUT_LEN = W_END;
 
 const int lib_n_parties = N_PARTIES;
 const int lib_m_kkw     = M_KKW;

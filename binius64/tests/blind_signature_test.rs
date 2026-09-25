@@ -28,10 +28,14 @@ fn blind_signature_roundtrip() {
         .verify(&blind_sig, &message)
         .expect("Blind signature verification failed");
 
-    blind_sig.proof[0] ^= 1;
-    verifier
-        .verify(&blind_sig, &message)
-        .expect_err("a modified proof domain separator must be rejected");
+    let previous_label = b"blind-xmss-binius64-v6-salted-ghash";
+    blind_sig.proof[..previous_label.len()].copy_from_slice(previous_label);
+    assert!(matches!(
+        verifier.verify(&blind_sig, &message),
+        Err(blind_xmss_binius64::BlindSigError::Proof(
+            blind_xmss_binius64::protocol::verifier::UnifiedVerifyError::InvalidDomainSeparator
+        ))
+    ));
 }
 
 fn make_valid_xmss_sig() -> (XmssKeyPair, XmssSignature, Message) {

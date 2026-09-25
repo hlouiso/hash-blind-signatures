@@ -45,6 +45,9 @@ static void run_leaf(uint32_t leaf)
         memcpy(input + W_SIG_OFF + i*XMSS_NODE_BYTES, sig.sig_hashes[i], XMSS_NODE_BYTES);
     for (int h = 0; h < XMSS_H; h++)
         memcpy(input + W_PATH_OFF + h*XMSS_NODE_BYTES, sig.auth_path[h], XMSS_NODE_BYTES);
+    if (!kkw_build_schedule(input, m_hat, pk_seed)) {
+        fprintf(stderr, "FAIL: schedule construction\n"); exit(1);
+    }
 
     uint32_t pubout[8];
     memset(pubout, 0, sizeof pubout);

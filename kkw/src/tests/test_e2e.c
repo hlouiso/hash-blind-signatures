@@ -49,6 +49,9 @@ static void run_parties(unsigned char input[W_END], unsigned char m_hat[32],
         memcpy(input + W_SIG_OFF + i * XMSS_NODE_BYTES, sig.sig_hashes[i], XMSS_NODE_BYTES);
     for (int h = 0; h < XMSS_H; h++)
         memcpy(input + W_PATH_OFF + h * XMSS_NODE_BYTES, sig.auth_path[h], XMSS_NODE_BYTES);
+    if (!kkw_build_schedule(input, m_hat, pk_seed)) {
+        fprintf(stderr, "FAIL: schedule construction\n"); exit(1);
+    }
 
     memset(pubout, 0, 8 * sizeof(uint32_t));
     for (int w = 0; w < YP_ROOT_WORDS; w++)
@@ -85,6 +88,12 @@ int main(void)
     bad_pubout[0] ^= 0x01;
     rewind(proof);
     CHECK(kkw_verify(proof, m_hat, pk_seed, bad_pubout) != 0, "verify rejects a forged public key");
+
+    memcpy(bad_pubout, pubout, sizeof bad_pubout);
+    bad_pubout[YP_POOL_WORD] = 1;
+    rewind(proof);
+    CHECK(kkw_verify(proof, m_hat, pk_seed, bad_pubout) != 0,
+          "proof binds the public pool check to zero");
 
     {
         fseek(proof, 0, SEEK_END);

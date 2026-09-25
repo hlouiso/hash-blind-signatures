@@ -11,7 +11,7 @@ build command, and benchmarks.
 ## Test
 
 ```sh
-cargo test
+cargo test --release --locked
 ```
 
 The Binius64 dependency is fetched over SSH, so Cargo needs access to a GitHub

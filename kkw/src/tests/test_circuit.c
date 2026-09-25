@@ -45,6 +45,9 @@ int main(void)
         memcpy(input + W_SIG_OFF + i*XMSS_NODE_BYTES, sig.sig_hashes[i], XMSS_NODE_BYTES);
     for (int h = 0; h < XMSS_H; h++)
         memcpy(input + W_PATH_OFF + h*XMSS_NODE_BYTES, sig.auth_path[h], XMSS_NODE_BYTES);
+    if (!kkw_build_schedule(input, m_hat, pk_seed)) {
+        fprintf(stderr, "FAIL: schedule construction\n"); exit(1);
+    }
 
     unsigned char seeds[N_PARTIES][SEED_SIZE];
     test_random_bytes(seeds[0], N_PARTIES * SEED_SIZE);
@@ -62,9 +65,8 @@ int main(void)
     for (int p = 0; p < N_PARTIES; p++)
         for (int b = 0; b < INPUT_LEN; b++) d_pub[b] ^= lam[p][b];
 
-    int YBIG = 300000;
-    uint32_t *aux = calloc((size_t)YBIG, sizeof(uint32_t));
-    uint32_t *s_all = calloc((size_t)N_PARTIES * YBIG, sizeof(uint32_t));
+    uint32_t *aux = calloc((size_t)ySize, sizeof(uint32_t));
+    uint32_t *s_all = calloc((size_t)N_PARTIES * ySize, sizeof(uint32_t));
     if (!aux || !s_all) { printf("FAIL: OOM\n"); return 1; }
 
     unsigned char r_j[32];
@@ -84,6 +86,8 @@ int main(void)
     for (int p = 0; p < N_PARTIES; p++) circ_sum ^= A.yp[p][YP_SUM_WORD];
     uint32_t circ_leftover = zh[YP_LEFTOVER_WORD];
     for (int p = 0; p < N_PARTIES; p++) circ_leftover ^= A.yp[p][YP_LEFTOVER_WORD];
+    uint32_t circ_pool = zh[YP_POOL_WORD];
+    for (int p = 0; p < N_PARTIES; p++) circ_pool ^= A.yp[p][YP_POOL_WORD];
 
     int ok_root = (memcmp(circ_root, root, XMSS_NODE_BYTES) == 0);
     int ok_sum  = (circ_sum == (uint32_t)XMSS_TARGET_SUM);
@@ -92,11 +96,14 @@ int main(void)
     printf("  circuit root  %s native root\n", ok_root ? "==" : "!=  MISMATCH");
     printf("  circuit sum   = %u (target %d) %s\n", circ_sum, XMSS_TARGET_SUM, ok_sum ? "ok" : "MISMATCH");
     printf("  leftover bits = %u (must be 0) %s\n", circ_leftover, ok_left ? "ok" : "MISMATCH");
-    printf("  gate count = %d  -> set ySize=%d in shared.c\n", g_circuit_gates, g_circuit_gates);
+    printf("  pool check = %u (must be 0)\n", circ_pool);
+    printf("  gate count = %d (expected %d)\n", g_circuit_gates, ySize);
 
     for (int p = 0; p < N_PARTIES; p++) { free(lam[p]); free(tapes[p]); }
     free(aux); free(s_all); free(d_pub);
 
-    if (ok_root && ok_sum && ok_left) { printf("\nCIRCUIT OK\n"); return 0; }
+    if (ok_root && ok_sum && ok_left && circ_pool == 0 && g_circuit_gates == ySize) {
+        printf("\nCIRCUIT OK\n"); return 0;
+    }
     printf("\nCIRCUIT FAILED\n"); return 1;
 }

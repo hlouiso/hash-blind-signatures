@@ -7,7 +7,7 @@ pub mod verifier;
 pub use user::MultiUser;
 pub use verifier::MultiVerifier;
 
-pub(crate) const PROOF_LABEL_MULTI: &[u8] = b"blind-xmss-binius64-multisig-v6-salted-ghash";
+pub(crate) const PROOF_LABEL_MULTI: &[u8] = b"blind-xmss-binius64-multisig-v7-salted-ghash";
 
 #[derive(Debug, Clone)]
 pub struct BlindMultiSignature {

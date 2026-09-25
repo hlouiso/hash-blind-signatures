@@ -50,6 +50,9 @@ static void build_witness(unsigned char *input_out, unsigned char *m_hat_out,
         memcpy(input_out + W_SIG_OFF + i*XMSS_NODE_BYTES, sig.sig_hashes[i], XMSS_NODE_BYTES);
     for (int h = 0; h < XMSS_H; h++)
         memcpy(input_out + W_PATH_OFF + h*XMSS_NODE_BYTES, sig.auth_path[h], XMSS_NODE_BYTES);
+    if (!kkw_build_schedule(input_out, m_hat_out, pk_seed_out)) {
+        fprintf(stderr, "FAIL: schedule construction\n"); exit(1);
+    }
 
     for (int w = 0; w < YP_ROOT_WORDS; w++)
         pubout_out[w] = xmss_node_load_word(root, (size_t)w);
@@ -309,6 +312,17 @@ static void test_tamper(void)
         if (v != pubout[w]) { still_root = 0; break; }
     }
     CHECK(!still_root, "tampered witness changes the circuit output");
+
+    /* Restore the tip and route its first scheduled step to the next chain.
+     * The explicit pool output must reject the resulting step-count mismatch. */
+    d_pub[W_SIG_OFF] ^= 0x01;
+    const unsigned char first = input[W_SCHEDULE_OFF];
+    d_pub[W_SCHEDULE_OFF] ^= first ^ (unsigned char)((first + 1) % XMSS_WOTS_LEN);
+    building_views(&A2, m_hat, pk_seed, d_pub, lam, tapes, aux, NULL, NULL, zh2);
+    uint32_t pool_bad = zh2[YP_POOL_WORD];
+    for (int p = 0; p < N_PARTIES; p++) pool_bad ^= A2.yp[p][YP_POOL_WORD];
+    CHECK(pool_bad != 0, "wrong chain counts set the public pool-failure output");
+    CHECK(g_circuit_gates == ySize, "malformed schedules preserve the fixed gate count");
 
     for (int p = 0; p < N_PARTIES; p++) { free(lam[p]); free(tapes[p]); }
     free(aux); free(d_pub);

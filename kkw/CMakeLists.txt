@@ -123,6 +123,7 @@ if(BUILD_TESTING)
     test_randombytes
     test_xmss
     test_circuit
+    test_pool
     test_roundtrip
     test_leaf
     test_e2e)
