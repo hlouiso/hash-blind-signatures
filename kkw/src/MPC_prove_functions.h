@@ -50,7 +50,9 @@ void mpc_blake3_compress(const mw cv[8], const mw m[16], uint32_t block_len,
                          unsigned char *tapes[N_PARTIES], uint32_t *aux,
                          uint32_t *s_all, int *gateCount);
 
-void mpc_blake3_th(const unsigned char *dom_pub, unsigned char *dom_lam[N_PARTIES],
+/* Same framing and derive-key context as blake3_th. Returns 0 without
+ * changing outputs or gateCount if sizes exceed the single-chunk API bounds. */
+int mpc_blake3_th(const unsigned char *dom_pub, unsigned char *dom_lam[N_PARTIES],
                    int dom_len,
                    const unsigned char *data_pub, unsigned char *data_lam[N_PARTIES],
                    int data_len,

@@ -28,6 +28,15 @@ fn blind_signature_roundtrip() {
         .verify(&blind_sig, &message)
         .expect("Blind signature verification failed");
 
+    for suffix in [&[0u8][..], b"trailing proof data".as_slice()] {
+        let original_len = blind_sig.proof.len();
+        blind_sig.proof.extend_from_slice(suffix);
+        verifier
+            .verify(&blind_sig, &message)
+            .expect_err("signature with trailing bytes must be rejected");
+        blind_sig.proof.truncate(original_len);
+    }
+
     let previous_label = b"blind-xmss-binius64-v6-salted-ghash";
     blind_sig.proof[..previous_label.len()].copy_from_slice(previous_label);
     assert!(matches!(

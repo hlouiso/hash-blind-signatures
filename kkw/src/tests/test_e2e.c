@@ -152,6 +152,17 @@ int main(void)
         CHECK(kkw_verify(padded, m_hat, pk_seed, pubout) != 0,
               "verify rejects a proof with trailing data");
         fclose(padded);
+
+        FILE *legacy = tmpfile();
+        if (!legacy) { printf("FAIL: tmpfile\n"); return 1; }
+        buf[3] = 'P';
+        if (fwrite(buf, 1, (size_t)plen, legacy) != (size_t)plen) {
+            printf("FAIL: legacy write\n"); return 1;
+        }
+        rewind(legacy);
+        CHECK(kkw_verify(legacy, m_hat, pk_seed, pubout) != 0,
+              "verify rejects the legacy raw-compression proof format");
+        fclose(legacy);
         free(buf);
     }
 

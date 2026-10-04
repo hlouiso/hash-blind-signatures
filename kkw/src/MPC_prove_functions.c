@@ -1,5 +1,6 @@
 #include "MPC_prove_functions.h"
 #include "blake3_th.h"
+#include "blake3_th_mpc.h"
 #include "shared.h"
 
 #include <stdint.h>
@@ -129,17 +130,7 @@ void mpc_blake3_compress(const mw cv[8], const mw m[16], uint32_t block_len,
     for (int i = 0; i < 8; i++) mpc_XOR(&v[i], &v[i + 8], &out[i]);
 }
 
-static inline uint32_t b3_le_word(const unsigned char *buf, int len, int off)
-{
-    uint32_t v = 0;
-    for (int b = 3; b >= 0; b--) {
-        int i = off + b;
-        v = (v << 8) | (uint32_t)((buf && i < len) ? buf[i] : 0);
-    }
-    return v;
-}
-
-void mpc_blake3_th(const unsigned char *dom_pub, unsigned char *dom_lam[N_PARTIES],
+int mpc_blake3_th(const unsigned char *dom_pub, unsigned char *dom_lam[N_PARTIES],
                    int dom_len,
                    const unsigned char *data_pub, unsigned char *data_lam[N_PARTIES],
                    int data_len,
@@ -148,29 +139,30 @@ void mpc_blake3_th(const unsigned char *dom_pub, unsigned char *dom_lam[N_PARTIE
                    unsigned char *tapes[N_PARTIES], uint32_t *aux,
                    uint32_t *s_all, int *gateCount)
 {
+    if (!blake3_th_mpc_valid_sizes(dom_len, data_len, out_len)) return 0;
 
     mw cv[8];
-    for (int w = 0; w < 8; w++) {
-        cv[w].h = b3_le_word(dom_pub, dom_len, w * 4);
-        for (int p = 0; p < N_PARTIES; p++)
-            cv[w].l[p] = b3_le_word(dom_lam ? dom_lam[p] : NULL, dom_len, w * 4);
-    }
-    cv[7].h = (uint32_t)dom_len;
+    for (int w = 0; w < 8; w++) mw_const(blake3_th_context_key[w], &cv[w]);
 
-    int nblocks = data_len ? (data_len + 63) / 64 : 1;
+    const int framed_len = BLAKE3_TH_FRAME_LEN + dom_len + data_len;
+    const int nblocks = (framed_len + BLAKE3_BLOCK_LEN - 1) / BLAKE3_BLOCK_LEN;
     for (int b = 0; b < nblocks; b++) {
-        int off  = b * 64;
-        int blen = (data_len - off > 64) ? 64 : data_len - off;
+        const int off = b * BLAKE3_BLOCK_LEN;
+        const int blen = (framed_len - off > BLAKE3_BLOCK_LEN) ?
+                        BLAKE3_BLOCK_LEN : framed_len - off;
         mw m[16];
         for (int w = 0; w < 16; w++) {
-            m[w].h = b3_le_word(data_pub, data_len, off + w * 4);
+            m[w].h = blake3_th_mpc_word(dom_pub, dom_len, data_pub, data_len, off + w * 4, 0);
             for (int p = 0; p < N_PARTIES; p++)
-                m[w].l[p] = b3_le_word(data_lam ? data_lam[p] : NULL,
-                                       data_len, off + w * 4);
+                m[w].l[p] = blake3_th_mpc_word(dom_lam ? dom_lam[p] : NULL, dom_len,
+                                               data_lam ? data_lam[p] : NULL, data_len,
+                                               off + w * 4, 1);
         }
-        mpc_blake3_compress(cv, m, (uint32_t)blen,
-                            (b + 1 == nblocks) ? BLAKE3_ROOT : 0,
-                            cv, tapes, aux, s_all, gateCount);
+        const uint32_t flags = BLAKE3_DERIVE_KEY_MATERIAL |
+                               (b == 0 ? BLAKE3_CHUNK_START : 0) |
+                               (b + 1 == nblocks ? BLAKE3_CHUNK_END | BLAKE3_ROOT : 0);
+        mpc_blake3_compress(cv, m, (uint32_t)blen, flags, cv,
+                            tapes, aux, s_all, gateCount);
     }
 
     for (int i = 0; i < out_len; i++) {
@@ -178,4 +170,5 @@ void mpc_blake3_th(const unsigned char *dom_pub, unsigned char *dom_lam[N_PARTIE
         for (int p = 0; p < N_PARTIES; p++)
             out_lam[p][i] = (unsigned char)(cv[i / 4].l[p] >> (8 * (i % 4)));
     }
+    return 1;
 }

@@ -18,6 +18,29 @@ int g_circuit_gates = 0;
 static const unsigned char HM_DOM_Y[3] = {'H', 'M', 'y'};
 static const unsigned char HM_DOM_D[3] = {'H', 'M', 'd'};
 
+/* Every circuit hash fits the single-chunk MPC gadget. Transcript hashes use
+ * the upstream native hasher and can span arbitrarily many chunks. */
+_Static_assert(XMSS_PK_SEED_BYTES + 2 + 4 <= BLAKE3_TH_MAX_DOMAIN &&
+               XMSS_PK_SEED_BYTES + 1 + XMSS_EPOCH_BYTES <= BLAKE3_TH_MAX_DOMAIN &&
+               XMSS_NODE_BYTES + 1 <= BLAKE3_TH_MAX_DOMAIN,
+               "XMSS domains exceed the tweakable-hash API bound");
+_Static_assert(BLAKE3_TH_FRAME_LEN + 3 + HM_R_BYTES <= BLAKE3_CHUNK_LEN,
+               "HM opening hash exceeds the MPC chunk bound");
+_Static_assert(BLAKE3_TH_FRAME_LEN + 3 + HM_COM_BYTES <= BLAKE3_CHUNK_LEN,
+               "HM commitment hash exceeds the MPC chunk bound");
+_Static_assert(BLAKE3_TH_FRAME_LEN + XMSS_PK_SEED_BYTES + 1 + XMSS_EPOCH_BYTES +
+               XMSS_NONCE_LEN + 32 <= BLAKE3_CHUNK_LEN,
+               "XMSS message hash exceeds the MPC chunk bound");
+_Static_assert(BLAKE3_TH_FRAME_LEN + XMSS_NODE_BYTES + 1 + XMSS_PK_SEED_BYTES +
+               XMSS_EPOCH_BYTES + 2 <= BLAKE3_CHUNK_LEN,
+               "WOTS chain hash exceeds the MPC chunk bound");
+_Static_assert(BLAKE3_TH_FRAME_LEN + XMSS_PK_SEED_BYTES + 1 + XMSS_EPOCH_BYTES +
+               XMSS_WOTS_LEN * XMSS_NODE_BYTES <= BLAKE3_CHUNK_LEN,
+               "WOTS public-key hash exceeds the MPC chunk bound");
+_Static_assert(BLAKE3_TH_FRAME_LEN + XMSS_PK_SEED_BYTES + 2 + 4 +
+               2 * XMSS_NODE_BYTES <= BLAKE3_CHUNK_LEN,
+               "Merkle node hash exceeds the MPC chunk bound");
+
 static uint32_t mh_bit(const unsigned char *buf, size_t j)
 {
     return (uint32_t)((buf[j / 8] >> (j % 8)) & 1u);

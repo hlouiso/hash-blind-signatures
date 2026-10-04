@@ -98,8 +98,7 @@ target_compile_definitions(blindmss PUBLIC
   N_PARTIES=${BLIND_MSS_N}
   GRIND_W=${BLIND_MSS_GRIND_W})
 target_link_libraries(blindmss
-  PUBLIC OpenMP::OpenMP_C
-  PRIVATE BLAKE3::blake3)
+  PUBLIC OpenMP::OpenMP_C BLAKE3::blake3)
 if(UNIX)
   target_link_libraries(blindmss PUBLIC m)
 endif()

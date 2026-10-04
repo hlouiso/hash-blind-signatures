@@ -8,8 +8,9 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* 23114 non-chain gates + 99 * 711 pooled-step gates + 11 final checks. */
-#define YSIZE_GATES 93514
+/* 23786 non-chain gates + 99 * 711 pooled-step gates + 11 final checks.
+ * Framing adds one compression each to HMd and the XMSS message hash. */
+#define YSIZE_GATES 94186
 const int ySize = YSIZE_GATES;
 const int INPUT_LEN = W_END;
 

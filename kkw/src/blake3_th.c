@@ -57,72 +57,46 @@ void blake3_compress(const uint32_t cv[8], const uint32_t block_words[16],
     for (int i = 0; i < 8; i++) out[i] = v[i] ^ v[i + 8];
 }
 
-static void load_words_le(const uint8_t *bytes, size_t len, uint32_t *w, int nwords)
+const uint32_t blake3_th_context_key[8] = {
+    0x92BC442Au, 0x717EB9D9u, 0xE6E35884u, 0x65D1A3F5u,
+    0xBE746F4Fu, 0x3B5F70D6u, 0xAF7DE478u, 0xECB68DB9u
+};
+
+int blake3_th_init(blake3_th_ctx *ctx, const uint8_t *domain, size_t domain_len)
 {
-    for (int i = 0; i < nwords; i++) {
-        uint32_t v = 0;
-        for (int b = 3; b >= 0; b--) {
-            size_t idx = (size_t)i * 4 + (size_t)b;
-            v = (v << 8) | (idx < len ? bytes[idx] : 0);
-        }
-        w[i] = v;
-    }
+    ctx->poisoned = (domain_len > BLAKE3_TH_MAX_DOMAIN || (!domain && domain_len));
+    if (ctx->poisoned) return 0;
+
+    uint8_t frame[BLAKE3_TH_FRAME_LEN];
+    for (size_t i = 0; i < sizeof frame; i++)
+        frame[i] = (uint8_t)((uint32_t)domain_len >> (8 * i));
+    blake3_hasher_init_derive_key(&ctx->hasher, BLAKE3_TH_CONTEXT);
+    blake3_hasher_update(&ctx->hasher, frame, sizeof frame);
+    if (domain_len) blake3_hasher_update(&ctx->hasher, domain, domain_len);
+    return 1;
 }
 
-void blake3_th_init(blake3_th_ctx *ctx, const uint8_t *domain, size_t domain_len)
+int blake3_th_update(blake3_th_ctx *ctx, const void *data, size_t len)
 {
-    ctx->buflen = 0;
-    ctx->poisoned = (domain_len > 28);
-    if (ctx->poisoned) { memset(ctx->cv, 0, sizeof ctx->cv); return; }
-    load_words_le(domain, domain_len, ctx->cv, 8);
-    ctx->cv[7] = (uint32_t)domain_len;
+    if (!data && len) ctx->poisoned = 1;
+    if (ctx->poisoned) return 0;
+    if (len) blake3_hasher_update(&ctx->hasher, data, len);
+    return 1;
 }
 
-void blake3_th_update(blake3_th_ctx *ctx, const void *data, size_t len)
+int blake3_th_final(const blake3_th_ctx *ctx, uint8_t *out, size_t out_len)
 {
-    const uint8_t *p = data;
-    if (ctx->poisoned || !p || len == 0) return;
-    while (len > 0) {
-
-        if (ctx->buflen == 64) {
-            uint32_t m[16];
-            load_words_le(ctx->buf, 64, m, 16);
-            blake3_compress(ctx->cv, m, 0, 64, 0, ctx->cv);
-            ctx->buflen = 0;
-        }
-        size_t take = 64 - ctx->buflen;
-        if (take > len) take = len;
-        memcpy(ctx->buf + ctx->buflen, p, take);
-        ctx->buflen += take;
-        p += take;
-        len -= take;
-    }
+    if (ctx->poisoned || out_len > BLAKE3_OUT_LEN || (!out && out_len)) return 0;
+    if (out_len) blake3_hasher_finalize(&ctx->hasher, out, out_len);
+    return 1;
 }
 
-void blake3_th_final(blake3_th_ctx *ctx, uint8_t *out, size_t out_len)
-{
-    if (ctx->poisoned) { memset(out, 0, out_len); return; }
-
-    uint32_t m[16];
-    load_words_le(ctx->buf, ctx->buflen, m, 16);
-    blake3_compress(ctx->cv, m, 0, (uint32_t)ctx->buflen, BLAKE3_ROOT, ctx->cv);
-
-    uint8_t full[32];
-    for (int i = 0; i < 8; i++) {
-        full[i*4+0] = (uint8_t)(ctx->cv[i]);
-        full[i*4+1] = (uint8_t)(ctx->cv[i] >> 8);
-        full[i*4+2] = (uint8_t)(ctx->cv[i] >> 16);
-        full[i*4+3] = (uint8_t)(ctx->cv[i] >> 24);
-    }
-    memcpy(out, full, out_len);
-}
-
-void blake3_th(const uint8_t *domain, size_t domain_len,
+int blake3_th(const uint8_t *domain, size_t domain_len,
                const uint8_t *data, size_t data_len,
                uint8_t *out, size_t out_len)
 {
     blake3_th_ctx ctx;
-    blake3_th_init(&ctx, domain, domain_len);
-    blake3_th_update(&ctx, data, data_len);
-    blake3_th_final(&ctx, out, out_len);
+    return blake3_th_init(&ctx, domain, domain_len) &&
+           blake3_th_update(&ctx, data, data_len) &&
+           blake3_th_final(&ctx, out, out_len);
 }

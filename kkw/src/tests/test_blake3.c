@@ -23,6 +23,22 @@ static int hex2bin(const char *hex, uint8_t *out, size_t n)
     return 1;
 }
 
+/* Independent reference using only the pinned upstream API. */
+static void reference_th(const uint8_t *domain, size_t domain_len,
+                         const uint8_t *data, size_t data_len, uint8_t out[32])
+{
+    const uint8_t frame[4] = {
+        (uint8_t)domain_len, (uint8_t)(domain_len >> 8),
+        (uint8_t)(domain_len >> 16), (uint8_t)(domain_len >> 24)
+    };
+    blake3_hasher h;
+    blake3_hasher_init_derive_key(&h, "blind-mss tweakable hash v2");
+    blake3_hasher_update(&h, frame, sizeof frame);
+    if (domain_len) blake3_hasher_update(&h, domain, domain_len);
+    if (data_len) blake3_hasher_update(&h, data, data_len);
+    blake3_hasher_finalize(&h, out, 32);
+}
+
 static void root_digest(const uint8_t *in, size_t len, uint8_t out32[32])
 {
     uint32_t iv[8] = {0x6A09E667,0xBB67AE85,0x3C6EF372,0xA54FF53A,
@@ -87,6 +103,10 @@ static void test_th(void)
     blake3_th((const uint8_t *)"dom1", 4, data, 100, a, 32);
     CHECK(memcmp(a, b, 32) != 0, "domain-length binding (D vs D||0x00)");
 
+    blake3_th((const uint8_t *)"a", 1, (const uint8_t *)"bc", 2, a, 32);
+    blake3_th((const uint8_t *)"ab", 2, (const uint8_t *)"c", 1, b, 32);
+    CHECK(memcmp(a, b, 32) != 0, "length framing prevents ambiguous domain/data concatenation");
+
     uint8_t ext[64];
     test_random_bytes(ext, 64);
     blake3_th((const uint8_t *)"dom1", 4, data, 64, a, 32);
@@ -100,7 +120,8 @@ static void test_th(void)
     for (int i = 0; i < 16; i++)
         em[i] = (uint32_t)ext[4*i] | ((uint32_t)ext[4*i+1] << 8)
               | ((uint32_t)ext[4*i+2] << 16) | ((uint32_t)ext[4*i+3] << 24);
-    blake3_compress(st, em, 0, 64, BLAKE3_ROOT, st);
+    blake3_compress(st, em, 0, 64,
+                    BLAKE3_DERIVE_KEY_MATERIAL | BLAKE3_CHUNK_END | BLAKE3_ROOT, st);
     uint8_t extended[32];
     for (int i = 0; i < 8; i++) {
         extended[i*4+0] = (uint8_t)(st[i]);
@@ -112,39 +133,43 @@ static void test_th(void)
 
     enum { TWEAK_BYTES = XMSS_PK_SEED_BYTES + XMSS_EPOCH_BYTES + 2 };
     uint8_t prev[XMSS_NODE_BYTES], dom_chain[XMSS_NODE_BYTES + 1];
-    uint8_t tweak[TWEAK_BYTES], cv_bytes[32];
+    uint8_t tweak[TWEAK_BYTES];
     test_random_bytes(prev, sizeof prev); test_random_bytes(tweak, sizeof tweak);
     memcpy(dom_chain, prev, sizeof prev);
     dom_chain[XMSS_NODE_BYTES] = XMSS_TWEAK_CHAIN;
     blake3_th(dom_chain, sizeof dom_chain, tweak, sizeof tweak, a, XMSS_NODE_BYTES);
     uint32_t cv[8], m[16] = {0};
-    memset(cv_bytes, 0, 32); memcpy(cv_bytes, dom_chain, sizeof dom_chain);
-    for (int i = 0; i < 8; i++)
-        cv[i] = (uint32_t)cv_bytes[4*i] | ((uint32_t)cv_bytes[4*i+1] << 8)
-              | ((uint32_t)cv_bytes[4*i+2] << 16) | ((uint32_t)cv_bytes[4*i+3] << 24);
-    cv[7] = XMSS_NODE_BYTES + 1;
-    uint8_t blk[64] = {0}; memcpy(blk, tweak, sizeof tweak);
+    memcpy(cv, blake3_th_context_key, sizeof cv);
+    uint8_t blk[64] = {0};
+    blk[0] = sizeof dom_chain;
+    memcpy(blk + 4, dom_chain, sizeof dom_chain);
+    memcpy(blk + 4 + sizeof dom_chain, tweak, sizeof tweak);
     for (int i = 0; i < 16; i++)
         m[i] = (uint32_t)blk[4*i] | ((uint32_t)blk[4*i+1] << 8)
              | ((uint32_t)blk[4*i+2] << 16) | ((uint32_t)blk[4*i+3] << 24);
-    blake3_compress(cv, m, 0, sizeof tweak, BLAKE3_ROOT, cv);
+    blake3_compress(cv, m, 0, 4 + sizeof dom_chain + sizeof tweak,
+                    BLAKE3_DERIVE_KEY_MATERIAL | BLAKE3_CHUNK_START |
+                    BLAKE3_CHUNK_END | BLAKE3_ROOT, cv);
     uint8_t direct[XMSS_NODE_BYTES];
     for (int i = 0; i < XMSS_NODE_WORDS; i++)
         xmss_node_store_word(direct, (size_t)i, cv[i]);
     CHECK(memcmp(a, direct, XMSS_NODE_BYTES) == 0,
-          "chain step == single compression");
+          "framed chain step == one standard derive-key compression");
+    reference_th(dom_chain, sizeof dom_chain, tweak, sizeof tweak, b);
+    CHECK(memcmp(a, b, XMSS_NODE_BYTES) == 0,
+          "chain step matches the upstream derive-key API");
 }
 
-static void build_cv(const uint8_t *dom, size_t len, uint8_t cv[32])
+static void build_domain_frame(const uint8_t *dom, size_t len, uint8_t frame[32])
 {
-    memset(cv, 0, 32);
-    memcpy(cv, dom, len);
-    cv[28] = (uint8_t)len;
+    memset(frame, 0, 32);
+    frame[0] = (uint8_t)len;
+    memcpy(frame + 4, dom, len);
 }
 
 static void test_domains(void)
 {
-    printf("--- Test 2b: pairwise-distinct chaining values across call sites ---\n");
+    printf("--- Test 2b: pairwise-distinct domain frames across call sites ---\n");
 
     uint8_t pk_seed[XMSS_PK_SEED_BYTES], node[XMSS_NODE_BYTES];
     test_random_bytes(pk_seed, sizeof pk_seed);
@@ -198,16 +223,16 @@ static void test_domains(void)
     CHECK(kkw_len_ok,
           "no KKW-layer tag has the chain-family length or exceeds 28 bytes");
 
-    for (int i = 0; i < NDOM; i++) build_cv(dom[i], len[i], cv[i]);
+    for (int i = 0; i < NDOM; i++) build_domain_frame(dom[i], len[i], cv[i]);
 
     int distinct = 1;
     for (int i = 0; i < NDOM && distinct; i++)
         for (int j = i + 1; j < NDOM && distinct; j++)
             if (memcmp(cv[i], cv[j], 32) == 0) {
-                printf("  cv collision: %s vs %s\n", name[i], name[j]);
+                printf("  domain frame collision: %s vs %s\n", name[i], name[j]);
                 distinct = 0;
             }
-    CHECK(distinct, "all call-site cvs pairwise distinct (XMSS + HM + KKW layer)");
+    CHECK(distinct, "all call-site domain frames pairwise distinct (XMSS + HM + KKW)");
 
     int adv_ok = 1;
     for (int j = 1; j < NDOM && adv_ok; j++) {
@@ -216,27 +241,33 @@ static void test_domains(void)
         memcpy(evil_dom, dom[j],
                len[j] < XMSS_NODE_BYTES ? len[j] : XMSS_NODE_BYTES);
         evil_dom[XMSS_NODE_BYTES] = XMSS_TWEAK_CHAIN;
-        build_cv(evil_dom, sizeof evil_dom, evil_cv);
+        build_domain_frame(evil_dom, sizeof evil_dom, evil_cv);
         if (memcmp(evil_cv, cv[j], 32) == 0) {
             printf("  adversarial chain node collides with %s\n", name[j]);
             adv_ok = 0;
         }
     }
-    CHECK(adv_ok, "witness-chosen chain node cannot reach another family's cv");
+    CHECK(adv_ok, "witness-chosen chain node cannot reach another family's domain frame");
 }
 
 static void test_incremental(void)
 {
     printf("--- Test 2c: incremental Th == one-shot Th ---\n");
-    uint8_t data[300];
+    uint8_t data[16385];
     for (size_t i = 0; i < sizeof data; i++) data[i] = (uint8_t)(i % 251);
-    const size_t lens[] = { 0, 1, 63, 64, 65, 127, 128, 130, 192, 300 };
+    /* The length prefix and seven-byte domain shift block/chunk boundaries. */
+    const size_t lens[] = { 0, 1, 52, 53, 54, 63, 64, 65, 127, 128, 130, 192, 300,
+                           1012, 1013, 1014, 1023, 1024, 1025, 2048, 16385 };
     int all_ok = 1;
     for (size_t li = 0; li < sizeof lens / sizeof lens[0]; li++) {
         size_t n = lens[li];
-        uint8_t ref[32], inc[32];
+        uint8_t ref[32], inc[32], upstream[32];
         blake3_th((const uint8_t *)"inctest", 7, data, n, ref, 32);
+        reference_th((const uint8_t *)"inctest", 7, data, n, upstream);
+        if (memcmp(ref, upstream, 32) != 0) all_ok = 0;
         for (size_t cut = 0; cut <= n; cut++) {
+            if (n > 300 && cut > 65 && cut != 1023 && cut != 1024 &&
+                cut != 1025 && cut != n / 2 && cut != n - 1 && cut != n) continue;
             blake3_th_ctx c;
             blake3_th_init(&c, (const uint8_t *)"inctest", 7);
             blake3_th_update(&c, data, cut);
@@ -257,34 +288,61 @@ static void test_incremental(void)
         blake3_th_final(&c3, inc, 32);
         if (memcmp(ref, inc, 32) != 0) all_ok = 0;
     }
-    CHECK(all_ok, "init/update/final matches one-shot at all lengths and splits");
+    CHECK(all_ok, "native/incremental hashes match upstream across block/chunk boundaries");
+}
 
-    uint8_t longdom[29] = {0}, z1[32], z2[32], zeros[32] = {0};
-    blake3_th(longdom, 29, data, 10, z1, 32);
-    blake3_th_ctx cp;
-    blake3_th_init(&cp, longdom, 29);
-    blake3_th_update(&cp, data, 10);
-    blake3_th_final(&cp, z2, 32);
-    CHECK(memcmp(z1, zeros, 32) == 0 && memcmp(z2, zeros, 32) == 0,
-          "domain_len > 28 yields all-zero output on both APIs");
+static void test_bounds(void)
+{
+    printf("--- Test 2d: native API bounds ---\n");
+    uint8_t domain[29] = {0}, out[64], untouched[64], expected[32];
+    memset(untouched, 0xA5, sizeof untouched);
+    memcpy(out, untouched, sizeof out);
+    blake3_th_ctx ctx;
+    CHECK(blake3_th_init(&ctx, domain, 28), "maximum domain length accepted");
+    const size_t invalid_lengths[] = {33, 64, SIZE_MAX};
+    for (size_t i = 0; i < sizeof invalid_lengths / sizeof invalid_lengths[0]; i++) {
+        CHECK(!blake3_th_final(&ctx, out, invalid_lengths[i]) &&
+              memcmp(out, untouched, sizeof out) == 0,
+              "oversized output rejected without touching the destination");
+    }
+    CHECK(!blake3_th(domain, 28, NULL, 0, out, 33) &&
+          memcmp(out, untouched, sizeof out) == 0,
+          "one-shot API rejects oversized output");
+    CHECK(blake3_th_final(&ctx, out, 32), "valid finalization after rejected output length");
+    reference_th(domain, 28, NULL, 0, expected);
+    CHECK(memcmp(out, expected, 32) == 0, "maximum domain matches upstream");
+    CHECK(blake3_th_final(&ctx, out, 16) && memcmp(out, expected, 16) == 0,
+          "repeated finalization and truncation match upstream");
+    memcpy(out, untouched, sizeof out);
+    CHECK(!blake3_th_init(&ctx, domain, 29) && !blake3_th_update(&ctx, NULL, 0) &&
+          !blake3_th_final(&ctx, out, 32) && memcmp(out, untouched, sizeof out) == 0,
+          "oversized domain poisons the context and produces no output");
+    CHECK(!blake3_th(domain, 29, NULL, 0, out, 32) &&
+          memcmp(out, untouched, sizeof out) == 0, "one-shot API rejects oversized domain");
+    CHECK(!blake3_th(NULL, 1, NULL, 0, out, 32) &&
+          memcmp(out, untouched, sizeof out) == 0, "NULL nonempty domain rejected");
+    CHECK(blake3_th_init(&ctx, NULL, 0) && !blake3_th_update(&ctx, NULL, 1) &&
+          !blake3_th_final(&ctx, out, 32) && memcmp(out, untouched, sizeof out) == 0,
+          "NULL nonempty data poisons the context");
+    CHECK(blake3_th(NULL, 0, NULL, 0, NULL, 0), "empty input and zero output accepted");
 }
 
 static void test_kkw_kat(void)
 {
-    printf("--- Test 2d: frozen KKW-domain KAT (format freeze) ---\n");
+    printf("--- Test 2e: frozen KKW-domain derive-key v2 KAT ---\n");
     static const struct { const char *tag; const char *hex; } KAT[12] = {
-        { "KKWppcom",  "56dd77671c04694ec9719440a35c57820e24e5c07beff7c3753bdea241c29c27" },
-        { "KKWhj",     "73fe6f43408dde3625af4b47d449bd5f68b8e6e8314568f68ca2d7bf7f9e7ca1" },
-        { "KKWhprime", "a7c7180772965c0c8b7f7773cdc115652c5f925d68370042b1fe4f33e28d8a4b" },
-        { "KKWhout",   "e29374e683ab42de51cf08075b780d812e4d76a587f6a0c819bf476ab3c76998" },
-        { "KKWhstar1", "7a49f33d0c0cf33b4fb28604ef7bc54307b9b3e0aef696a9cbe0e9f308be3a36" },
-        { "KKWhstar2", "42c796a146906ab532000d58336e76ab28f4a62d5e5e2a07dc3dd7f83bb5d7d0" },
-        { "KKWhstar3", "3bdc3c3016f2e0cbe07c66d9bcfa714f3a05a7ea4d0fb62321d2042188d125f5" },
-        { "KKWhstar",  "f35e620a7f9c3eb9d9dbf9c0003367a6ae66be2fde9e01886f81861c935738ba" },
-        { "KKWfs",     "6d483d45eeb47ecbb71e1a19b6bab035d3b035a22d4bfca17c8ecbd069adb4f1" },
-        { "KKWgrind",  "01eff4962b3f0b64a47cc24036793bad4f126ae02b55a13374a9b20d8f81a5e6" },
-        { "KKWprg",    "ea2be5d38844c397a9469637ea3c0b58e82df09074ec9490d9a95f7d2314c089" },
-        { "KKWmhat",   "85158b406504e572164d0929093fb0e5667415805fd4689d767cdd9df2eec780" },
+        { "KKWppcom",  "6ba6d31a30787f5890944bc9b2432aeeaf6f69f63d6bc93040ea9edc90f2e537" },
+        { "KKWhj",     "f08d75340cc442f8592eb8b7613e1f689e6177dc3c4108c4d181e325d5dade4b" },
+        { "KKWhprime", "b39d55a4d5fe04fe3f8a40f24ffca84b270eab7745e06b18ec3a729f2893d813" },
+        { "KKWhout",   "629cc00bd970175cacfd209f2424e5763d6bd47098c2a43aa4620d53e42ff361" },
+        { "KKWhstar1", "4b70ed678ba89069c5b366a8bd3e71f0c5d732a8ee59677f2e72fab7303450c2" },
+        { "KKWhstar2", "43fde92ffae25e73de393cb813c87d5b3c04a04965aeadb917668256f2c2b6c3" },
+        { "KKWhstar3", "465bee6f31c4753d5a56d64b681e11e91d8c28c01fe66b4be841b1242d389c14" },
+        { "KKWhstar",  "4f7f3255fe3feb3fd5ae9512bbd7cfe4d6eed70e086222b772d8963cc1588df5" },
+        { "KKWfs",     "779991ec68fa681ec0d8367655402f1aa0963ad06b2b47b86028ff035502538e" },
+        { "KKWgrind",  "545e8d207034a52f67d4385fd792144b913b33058d1315462292f83b580985a4" },
+        { "KKWprg",    "7072298ee80dc8b83253267759aa6651696de0be77dd0b503b2cc8a8c880adfd" },
+        { "KKWmhat",   "4c7968b58cf3bb8fc825cff14757fd955b98dd24f7169ce0ff6f00b6f79980ae" },
     };
 
     const char *tags_now[12] = {
@@ -307,14 +365,14 @@ static void test_kkw_kat(void)
     CHECK(kat_ok, "Th(KKW_DOM_*, pattern) matches the frozen vectors");
 }
 
-static void test_mpc(void)
+static void test_mpc(int dom_len, int data_len, int out_len)
 {
-    printf("--- Test 3: mpc_blake3_th vs native (prove + verify paths) ---\n");
+    printf("--- Test 3: MPC vs upstream (domain=%d data=%d output=%d) ---\n",
+           dom_len, data_len, out_len);
 
-    const int dom_len = 21, data_len = 100;
-    uint8_t dom[21], data[100], want[32];
+    uint8_t dom[28], data[1024], want[32];
     test_random_bytes(dom, dom_len); test_random_bytes(data, data_len);
-    blake3_th(dom, dom_len, data, data_len, want, 32);
+    reference_th(dom, (size_t)dom_len, data, (size_t)data_len, want);
 
     unsigned char seed_star[SEED_SIZE];
     test_random_bytes(seed_star, SEED_SIZE);
@@ -323,7 +381,7 @@ static void test_mpc(void)
     unsigned char *tapes[N_PARTIES], *lamb[N_PARTIES];
     for (int p = 0; p < N_PARTIES; p++) {
         tapes[p] = malloc(TAPE_SIZE);
-        lamb[p]  = malloc(dom_len + data_len);
+        lamb[p]  = malloc((size_t)(dom_len + data_len) + 1);
         expand_tape(seeds[p], tapes[p]);
 
         unsigned char xs[4096];
@@ -331,7 +389,7 @@ static void test_mpc(void)
         memcpy(lamb[p], xs, dom_len + data_len);
     }
 
-    unsigned char dom_pub[21], data_pub[100];
+    unsigned char dom_pub[28], data_pub[1024];
     memcpy(dom_pub, dom, dom_len);
     memcpy(data_pub, data, data_len);
     for (int p = 0; p < N_PARTIES; p++) {
@@ -351,15 +409,17 @@ static void test_mpc(void)
     for (int p = 0; p < N_PARTIES; p++) out_lam[p] = out_lam_buf[p];
 
     int gc = 0;
-    mpc_blake3_th(dom_pub, dom_lam, dom_len, data_pub, data_lam, data_len,
-                  out_pub, out_lam, 32, tapes, aux, s_all, &gc);
+    CHECK(mpc_blake3_th(dom_pub, dom_lam, dom_len, data_pub, data_lam, data_len,
+                        out_pub, out_lam, out_len, tapes, aux, s_all, &gc),
+          "prover accepts valid gadget sizes");
     printf("  (gadget gates: %d)\n", gc);
 
     unsigned char got[32];
-    memcpy(got, out_pub, 32);
+    memcpy(got, out_pub, (size_t)out_len);
     for (int p = 0; p < N_PARTIES; p++)
-        for (int i = 0; i < 32; i++) got[i] ^= out_lam_buf[p][i];
-    CHECK(memcmp(got, want, 32) == 0, "prove path unmasks to native blake3_th");
+        for (int i = 0; i < out_len; i++) got[i] ^= out_lam_buf[p][i];
+    CHECK(memcmp(got, want, (size_t)out_len) == 0,
+          "prove path unmasks to upstream derive-key hash");
 
     uint32_t *msgs_e   = malloc((size_t)ySize * sizeof(uint32_t));
     uint32_t *s_slots  = malloc((size_t)(N_PARTIES-1) * ySize * sizeof(uint32_t));
@@ -377,12 +437,17 @@ static void test_mpc(void)
         unsigned char *vout_lam[N_PARTIES-1];
         for (int j = 0; j < N_PARTIES-1; j++) vout_lam[j] = vout_lam_buf[j];
         int vgc = 0;
-        mpc_blake3_th_verify(dom_pub, vdlam, dom_len, data_pub, vdatalam, data_len,
-                             vout_pub, vout_lam, 32,
-                             vtapes, e, msgs_e, aux, s_slots, &vgc);
+        CHECK(mpc_blake3_th_verify(dom_pub, vdlam, dom_len, data_pub, vdatalam, data_len,
+                                    vout_pub, vout_lam, out_len,
+                                    vtapes, e, msgs_e, aux, s_slots, &vgc),
+              "verifier accepts valid gadget sizes");
         char msg[64];
         snprintf(msg, sizeof msg, "verify path matches public output (e=%d)", e);
-        int ok = (vgc == gc) && (memcmp(vout_pub, out_pub, 32) == 0);
+        int ok = (vgc == gc) && (memcmp(vout_pub, out_pub, (size_t)out_len) == 0);
+        for (int j = 0; j < N_PARTIES-1 && ok; j++) {
+            int o = (j < e) ? j : j + 1;
+            if (memcmp(vout_lam[j], out_lam[o], (size_t)out_len) != 0) ok = 0;
+        }
 
         for (int j = 0; j < N_PARTIES-1 && ok; j++) {
             int o = (j < e) ? j : j + 1;
@@ -397,6 +462,29 @@ static void test_mpc(void)
     free(aux); free(s_all); free(msgs_e); free(s_slots);
 }
 
+static void test_mpc_bounds(void)
+{
+    printf("--- Test 4: MPC API bounds ---\n");
+    const int invalid[][3] = {
+        {-1, 0, 32}, {29, 0, 32}, {0, -1, 32}, {0, 1021, 32},
+        {28, 993, 32}, {0, 0, -1}, {0, 0, 33}
+    };
+    for (size_t i = 0; i < sizeof invalid / sizeof invalid[0]; i++) {
+        uint8_t out[32], untouched[32];
+        memset(out, 0xA5, sizeof out);
+        memcpy(untouched, out, sizeof out);
+        int gc = 17;
+        CHECK(!mpc_blake3_th(NULL, NULL, invalid[i][0], NULL, NULL, invalid[i][1],
+                             out, NULL, invalid[i][2], NULL, NULL, NULL, &gc) &&
+              gc == 17 && memcmp(out, untouched, sizeof out) == 0,
+              "invalid prover sizes rejected before consuming gates or writing output");
+        CHECK(!mpc_blake3_th_verify(NULL, NULL, invalid[i][0], NULL, NULL, invalid[i][1],
+                                    out, NULL, invalid[i][2], NULL, 0, NULL, NULL, NULL, &gc) &&
+              gc == 17 && memcmp(out, untouched, sizeof out) == 0,
+              "invalid verifier sizes rejected before consuming gates or writing output");
+    }
+}
+
 int main(void)
 {
     ASSERT_LIB_PARAMS();
@@ -404,8 +492,17 @@ int main(void)
     test_th();
     test_domains();
     test_incremental();
+    test_bounds();
     test_kkw_kat();
-    test_mpc();
+    const int mpc_cases[][3] = {
+        {0, 0, 32}, {1, 0, 1}, {21, 0, 32}, {21, 38, 32}, {21, 39, 32},
+        {21, 40, 32}, {21, 100, 32}, {3, 96, 32}, {3, 256, 32},
+        {17, 22, 16}, {21, 56, 32}, {21, 672, 16}, {22, 32, 16},
+        {0, 1020, 32}, {28, 992, 32}
+    };
+    for (size_t i = 0; i < sizeof mpc_cases / sizeof mpc_cases[0]; i++)
+        test_mpc(mpc_cases[i][0], mpc_cases[i][1], mpc_cases[i][2]);
+    test_mpc_bounds();
     printf("\n%s (%d failure%s)\n", failures?"FAILURES":"ALL PASS", failures, failures==1?"":"s");
     return failures ? 1 : 0;
 }

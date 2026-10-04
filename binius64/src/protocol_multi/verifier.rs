@@ -74,7 +74,12 @@ impl MultiVerifier {
             })?;
 
         verify_salted(&self.zk_verifier, &public, &mut verifier_transcript)
-            .map_err(|e| BlindMultiSigError::Proof(UnifiedVerifyError::Proof(e)))
+            .map_err(|e| BlindMultiSigError::Proof(UnifiedVerifyError::Proof(e)))?;
+        verifier_transcript.finalize().map_err(|e| {
+            BlindMultiSigError::Proof(UnifiedVerifyError::Proof(
+                binius_verifier::Error::from(e).into(),
+            ))
+        })
     }
 
     fn build_public_inputs(&self, msg: &[u8]) -> Vec<Word> {

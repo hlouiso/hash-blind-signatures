@@ -53,7 +53,8 @@ void mpc_blake3_compress_verify(const mwv cv[8], const mwv m[16],
                                 const uint32_t *msgs_e, const uint32_t *aux,
                                 uint32_t *s_slots, int *gateCount);
 
-void mpc_blake3_th_verify(const unsigned char *dom_pub,
+/* Same framing, single-chunk bounds, and failure behavior as the prover. */
+int mpc_blake3_th_verify(const unsigned char *dom_pub,
                           unsigned char *dom_lam[N_PARTIES - 1], int dom_len,
                           const unsigned char *data_pub,
                           unsigned char *data_lam[N_PARTIES - 1], int data_len,

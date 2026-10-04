@@ -250,7 +250,7 @@ int kkw_prove(const unsigned char *input,
     {
         bool write_ok = true;
 
-        const unsigned char magic[4] = {'K','K','W','P'};
+        const unsigned char magic[4] = {'K','K','W','2'};
         uint32_t hdr[5] = { (uint32_t)N_PARTIES, (uint32_t)M_KKW,
                              (uint32_t)NUM_ROUNDS, (uint32_t)ySize,
                              (uint32_t)GRIND_W };

@@ -51,6 +51,15 @@ fn blind_multisig_full_roundtrip() {
         .verify(&blind_sig, &message)
         .expect("honest blind multi-signature must verify");
 
+    for suffix in [&[0u8][..], b"trailing proof data".as_slice()] {
+        let original_len = blind_sig.proof.len();
+        blind_sig.proof.extend_from_slice(suffix);
+        verifier
+            .verify(&blind_sig, &message)
+            .expect_err("multi-signature with trailing bytes must be rejected");
+        blind_sig.proof.truncate(original_len);
+    }
+
     let previous_label = b"blind-xmss-binius64-multisig-v6-salted-ghash";
     blind_sig.proof[..previous_label.len()].copy_from_slice(previous_label);
     assert!(matches!(
