@@ -2,10 +2,14 @@
 //! the commitment opening, XMSS signature, and epoch are witnesses.
 //! Binius64 fixes the BaseFold component at 96-bit security.
 
-use binius_core::constraint_system::ConstraintSystem;
+use binius_core::constraint_system::{ConstraintSystem, InoutSegment};
 use binius_frontend::{CircuitBuilder, Wire};
 use binius_hash::StdHashSuite;
-use binius_verifier::zk_config::ZKVerifier;
+use binius_verifier::{
+    protocols::shift::LOG_SHIFT_COUNT,
+    reduction::{LOG_OPERANDS, log_constraint_point},
+    zk_config::ZKVerifier,
+};
 
 use crate::gadgets::{BLIND_COMMIT_INOUTS, BlindCommitGadget, XmssVerifyGadget};
 use crate::hashes::DIGEST_WIRES;
@@ -19,17 +23,51 @@ pub type BlindZkVerifier = ZKVerifier<StdHashSuite>;
 
 pub type BlindZkProver = SaltedZkProver;
 
+/// The pinned upstream verifier indexes its sparse wiring matrix with a u64.
+#[derive(Debug)]
+pub struct WiringCapacityError {
+    pub required_bits: usize,
+}
+
+impl std::fmt::Display for WiringCapacityError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "Binius64 wiring address needs {} bits; upstream supports at most 63",
+            self.required_bits,
+        )
+    }
+}
+
+impl std::error::Error for WiringCapacityError {}
+
+pub(crate) fn build_verifier_rate(
+    cs: ConstraintSystem,
+    log_inv_rate: usize,
+) -> anyhow::Result<BlindZkVerifier> {
+    cs.validate()?;
+    // Check the upstream WiringInfo::new precondition before it can panic.
+    let required_bits = LOG_OPERANDS
+        + 2 * LOG_SHIFT_COUNT
+        + cs.log_segment_words(InoutSegment::Public)
+        + log_constraint_point(&cs);
+    if required_bits >= u64::BITS as usize {
+        return Err(WiringCapacityError { required_bits }.into());
+    }
+    BlindZkVerifier::setup(cs, log_inv_rate).map_err(Into::into)
+}
+
 pub fn build_prover_verifier(
     cs: ConstraintSystem,
 ) -> anyhow::Result<(BlindZkVerifier, BlindZkProver)> {
-    let zk_verifier = BlindZkVerifier::setup(cs, LOG_INV_RATE)?;
+    let zk_verifier = build_verifier(cs)?;
     let zk_prover = BlindZkProver::setup(&zk_verifier)?;
 
     Ok((zk_verifier, zk_prover))
 }
 
 pub fn build_verifier(cs: ConstraintSystem) -> anyhow::Result<BlindZkVerifier> {
-    BlindZkVerifier::setup(cs, LOG_INV_RATE).map_err(Into::into)
+    build_verifier_rate(cs, LOG_INV_RATE)
 }
 
 pub struct ProverSetup {
@@ -49,7 +87,7 @@ pub fn build_prover_setup_rate(
 ) -> anyhow::Result<(ProverSetup, BlindZkProver)> {
     let (circuit, cs, prover_fields) = build_circuit();
 
-    let zk_verifier = BlindZkVerifier::setup(cs, log_inv_rate)?;
+    let zk_verifier = build_verifier_rate(cs, log_inv_rate)?;
     let zk_prover = BlindZkProver::setup(&zk_verifier)?;
     Ok((
         ProverSetup {
@@ -68,7 +106,7 @@ pub fn build_verifier_setup() -> anyhow::Result<BlindZkVerifier> {
 
 pub fn build_verifier_setup_rate(log_inv_rate: usize) -> anyhow::Result<BlindZkVerifier> {
     let (_circuit, cs, _fields) = build_circuit();
-    BlindZkVerifier::setup(cs, log_inv_rate).map_err(Into::into)
+    build_verifier_rate(cs, log_inv_rate)
 }
 
 struct CircuitFields {

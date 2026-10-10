@@ -7,7 +7,7 @@ use binius_frontend::{CircuitBuilder, Wire};
 use crate::gadgets::{BLIND_COMMIT_INOUTS, BlindCommitGadget};
 use crate::gadgets_multi::XmssMultisigVerifyGadget;
 use crate::hashes::DIGEST_WIRES;
-use crate::setup::{BlindZkProver, BlindZkVerifier, LOG_INV_RATE};
+use crate::setup::{BlindZkProver, BlindZkVerifier, LOG_INV_RATE, build_verifier_rate};
 
 pub const fn n_inout_multi(n_signers: usize) -> usize {
     BLIND_COMMIT_INOUTS + DIGEST_WIRES * n_signers
@@ -39,7 +39,7 @@ pub fn build_prover_setup_multi_rate(
 ) -> anyhow::Result<(ProverSetupMulti, BlindZkProver)> {
     let (circuit, cs, fields) = build_circuit_multi(n_signers);
 
-    let zk_verifier = BlindZkVerifier::setup(cs, log_inv_rate)?;
+    let zk_verifier = build_verifier_rate(cs, log_inv_rate)?;
     let zk_prover = BlindZkProver::setup(&zk_verifier)?;
     Ok((
         ProverSetupMulti {
@@ -61,7 +61,7 @@ pub fn build_verifier_setup_multi_rate(
     log_inv_rate: usize,
 ) -> anyhow::Result<BlindZkVerifier> {
     let (_circuit, cs, _fields) = build_circuit_multi(n_signers);
-    BlindZkVerifier::setup(cs, log_inv_rate).map_err(Into::into)
+    build_verifier_rate(cs, log_inv_rate)
 }
 
 struct CircuitFields {
@@ -103,4 +103,19 @@ fn build_circuit_multi(
     };
 
     (circuit, cs, fields)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::setup::WiringCapacityError;
+
+    #[test]
+    fn oversized_multisig_returns_capacity_error_instead_of_panicking() {
+        let err = build_verifier_setup_multi(64)
+            .err()
+            .expect("64 signers exceed the pinned upstream wiring capacity");
+        let capacity = err.downcast_ref::<WiringCapacityError>().unwrap();
+        assert_eq!(capacity.required_bits, 65);
+    }
 }

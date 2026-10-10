@@ -58,7 +58,7 @@ dependencies = [
 [[package]]
 name = "binius-circuits"
 version = "0.1.0"
-source = "git+ssh://git@github.com/binius-zk/binius64.git#81cdfff40cb21746581df0b5ea34eaf1761bc82f"
+source = "git+https://github.com/binius-zk/binius64.git?rev=4428e759dd27956bd5b9ae5025d67eb8ccc1accf#4428e759dd27956bd5b9ae5025d67eb8ccc1accf"
 dependencies = [
  "binius-core",
  "binius-frontend",
@@ -73,7 +73,7 @@ dependencies = [
 [[package]]
 name = "binius-compute"
 version = "0.1.0"
-source = "git+ssh://git@github.com/binius-zk/binius64.git#81cdfff40cb21746581df0b5ea34eaf1761bc82f"
+source = "git+https://github.com/binius-zk/binius64.git?rev=4428e759dd27956bd5b9ae5025d67eb8ccc1accf#4428e759dd27956bd5b9ae5025d67eb8ccc1accf"
 dependencies = [
  "rayon",
 ]
@@ -81,7 +81,7 @@ dependencies = [
 [[package]]
 name = "binius-core"
 version = "0.1.0"
-source = "git+ssh://git@github.com/binius-zk/binius64.git#81cdfff40cb21746581df0b5ea34eaf1761bc82f"
+source = "git+https://github.com/binius-zk/binius64.git?rev=4428e759dd27956bd5b9ae5025d67eb8ccc1accf#4428e759dd27956bd5b9ae5025d67eb8ccc1accf"
 dependencies = [
  "binius-field",
  "binius-utils",
@@ -94,7 +94,7 @@ dependencies = [
 [[package]]
 name = "binius-field"
 version = "0.1.0"
-source = "git+ssh://git@github.com/binius-zk/binius64.git#81cdfff40cb21746581df0b5ea34eaf1761bc82f"
+source = "git+https://github.com/binius-zk/binius64.git?rev=4428e759dd27956bd5b9ae5025d67eb8ccc1accf#4428e759dd27956bd5b9ae5025d67eb8ccc1accf"
 dependencies = [
  "binius-utils",
  "bytemuck",
@@ -107,7 +107,7 @@ dependencies = [
 [[package]]
 name = "binius-frontend"
 version = "0.1.0"
-source = "git+ssh://git@github.com/binius-zk/binius64.git#81cdfff40cb21746581df0b5ea34eaf1761bc82f"
+source = "git+https://github.com/binius-zk/binius64.git?rev=4428e759dd27956bd5b9ae5025d67eb8ccc1accf#4428e759dd27956bd5b9ae5025d67eb8ccc1accf"
 dependencies = [
  "binius-compute",
  "binius-core",
@@ -126,7 +126,7 @@ dependencies = [
 [[package]]
 name = "binius-hash"
 version = "0.1.0"
-source = "git+ssh://git@github.com/binius-zk/binius64.git#81cdfff40cb21746581df0b5ea34eaf1761bc82f"
+source = "git+https://github.com/binius-zk/binius64.git?rev=4428e759dd27956bd5b9ae5025d67eb8ccc1accf#4428e759dd27956bd5b9ae5025d67eb8ccc1accf"
 dependencies = [
  "binius-utils",
  "blake3",
@@ -139,7 +139,7 @@ dependencies = [
 [[package]]
 name = "binius-hash-prover"
 version = "0.1.0"
-source = "git+ssh://git@github.com/binius-zk/binius64.git#81cdfff40cb21746581df0b5ea34eaf1761bc82f"
+source = "git+https://github.com/binius-zk/binius64.git?rev=4428e759dd27956bd5b9ae5025d67eb8ccc1accf#4428e759dd27956bd5b9ae5025d67eb8ccc1accf"
 dependencies = [
  "binius-compute",
  "binius-field",
@@ -159,7 +159,7 @@ dependencies = [
 [[package]]
 name = "binius-iop"
 version = "0.1.0"
-source = "git+ssh://git@github.com/binius-zk/binius64.git#81cdfff40cb21746581df0b5ea34eaf1761bc82f"
+source = "git+https://github.com/binius-zk/binius64.git?rev=4428e759dd27956bd5b9ae5025d67eb8ccc1accf#4428e759dd27956bd5b9ae5025d67eb8ccc1accf"
 dependencies = [
  "binius-core",
  "binius-field",
@@ -177,7 +177,7 @@ dependencies = [
 [[package]]
 name = "binius-iop-prover"
 version = "0.1.0"
-source = "git+ssh://git@github.com/binius-zk/binius64.git#81cdfff40cb21746581df0b5ea34eaf1761bc82f"
+source = "git+https://github.com/binius-zk/binius64.git?rev=4428e759dd27956bd5b9ae5025d67eb8ccc1accf#4428e759dd27956bd5b9ae5025d67eb8ccc1accf"
 dependencies = [
  "binius-compute",
  "binius-core",
@@ -200,7 +200,7 @@ dependencies = [
 [[package]]
 name = "binius-ip"
 version = "0.1.0"
-source = "git+ssh://git@github.com/binius-zk/binius64.git#81cdfff40cb21746581df0b5ea34eaf1761bc82f"
+source = "git+https://github.com/binius-zk/binius64.git?rev=4428e759dd27956bd5b9ae5025d67eb8ccc1accf#4428e759dd27956bd5b9ae5025d67eb8ccc1accf"
 dependencies = [
  "array-util",
  "binius-core",
@@ -214,7 +214,7 @@ dependencies = [
 [[package]]
 name = "binius-ip-prover"
 version = "0.1.0"
-source = "git+ssh://git@github.com/binius-zk/binius64.git#81cdfff40cb21746581df0b5ea34eaf1761bc82f"
+source = "git+https://github.com/binius-zk/binius64.git?rev=4428e759dd27956bd5b9ae5025d67eb8ccc1accf#4428e759dd27956bd5b9ae5025d67eb8ccc1accf"
 dependencies = [
  "auto_impl",
  "binius-compute",
@@ -232,7 +232,7 @@ dependencies = [
 [[package]]
 name = "binius-math"
 version = "0.1.0"
-source = "git+ssh://git@github.com/binius-zk/binius64.git#81cdfff40cb21746581df0b5ea34eaf1761bc82f"
+source = "git+https://github.com/binius-zk/binius64.git?rev=4428e759dd27956bd5b9ae5025d67eb8ccc1accf#4428e759dd27956bd5b9ae5025d67eb8ccc1accf"
 dependencies = [
  "binius-compute",
  "binius-field",
@@ -247,7 +247,7 @@ dependencies = [
 [[package]]
 name = "binius-prover"
 version = "0.1.0"
-source = "git+ssh://git@github.com/binius-zk/binius64.git#81cdfff40cb21746581df0b5ea34eaf1761bc82f"
+source = "git+https://github.com/binius-zk/binius64.git?rev=4428e759dd27956bd5b9ae5025d67eb8ccc1accf#4428e759dd27956bd5b9ae5025d67eb8ccc1accf"
 dependencies = [
  "binius-compute",
  "binius-core",
@@ -278,7 +278,7 @@ dependencies = [
 [[package]]
 name = "binius-spartan-frontend"
 version = "0.1.0"
-source = "git+ssh://git@github.com/binius-zk/binius64.git#81cdfff40cb21746581df0b5ea34eaf1761bc82f"
+source = "git+https://github.com/binius-zk/binius64.git?rev=4428e759dd27956bd5b9ae5025d67eb8ccc1accf#4428e759dd27956bd5b9ae5025d67eb8ccc1accf"
 dependencies = [
  "binius-field",
  "binius-utils",
@@ -289,7 +289,7 @@ dependencies = [
 [[package]]
 name = "binius-spartan-prover"
 version = "0.1.0"
-source = "git+ssh://git@github.com/binius-zk/binius64.git#81cdfff40cb21746581df0b5ea34eaf1761bc82f"
+source = "git+https://github.com/binius-zk/binius64.git?rev=4428e759dd27956bd5b9ae5025d67eb8ccc1accf#4428e759dd27956bd5b9ae5025d67eb8ccc1accf"
 dependencies = [
  "binius-compute",
  "binius-core",
@@ -315,7 +315,7 @@ dependencies = [
 [[package]]
 name = "binius-spartan-verifier"
 version = "0.1.0"
-source = "git+ssh://git@github.com/binius-zk/binius64.git#81cdfff40cb21746581df0b5ea34eaf1761bc82f"
+source = "git+https://github.com/binius-zk/binius64.git?rev=4428e759dd27956bd5b9ae5025d67eb8ccc1accf#4428e759dd27956bd5b9ae5025d67eb8ccc1accf"
 dependencies = [
  "binius-core",
  "binius-field",
@@ -333,7 +333,7 @@ dependencies = [
 [[package]]
 name = "binius-transcript"
 version = "0.1.0"
-source = "git+ssh://git@github.com/binius-zk/binius64.git#81cdfff40cb21746581df0b5ea34eaf1761bc82f"
+source = "git+https://github.com/binius-zk/binius64.git?rev=4428e759dd27956bd5b9ae5025d67eb8ccc1accf#4428e759dd27956bd5b9ae5025d67eb8ccc1accf"
 dependencies = [
  "auto_impl",
  "binius-field",
@@ -347,7 +347,7 @@ dependencies = [
 [[package]]
 name = "binius-utils"
 version = "0.1.0"
-source = "git+ssh://git@github.com/binius-zk/binius64.git#81cdfff40cb21746581df0b5ea34eaf1761bc82f"
+source = "git+https://github.com/binius-zk/binius64.git?rev=4428e759dd27956bd5b9ae5025d67eb8ccc1accf#4428e759dd27956bd5b9ae5025d67eb8ccc1accf"
 dependencies = [
  "array-util",
  "bytes",
@@ -355,13 +355,12 @@ dependencies = [
  "rand",
  "rayon",
  "thiserror",
- "trait-set",
 ]
 
 [[package]]
 name = "binius-verifier"
 version = "0.1.0"
-source = "git+ssh://git@github.com/binius-zk/binius64.git#81cdfff40cb21746581df0b5ea34eaf1761bc82f"
+source = "git+https://github.com/binius-zk/binius64.git?rev=4428e759dd27956bd5b9ae5025d67eb8ccc1accf#4428e759dd27956bd5b9ae5025d67eb8ccc1accf"
 dependencies = [
  "binius-core",
  "binius-field",
@@ -520,18 +519,18 @@ dependencies = [
 
 [[package]]
 name = "cranelift-bitset"
-version = "0.135.2"
+version = "0.136.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "61ca4f30f5f2eb3837b6e73664d9c0c9a42c4c0dce05f0027f2f2af54c1b20d7"
+checksum = "3a1e4c34abe94193ada09f821f474be87ac8a1fbbacd87058571ef04c1bf4009"
 dependencies = [
  "wasmtime-internal-core",
 ]
 
 [[package]]
 name = "cranelift-entity"
-version = "0.135.2"
+version = "0.136.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bc2c3088c6be94765abea42eccff7ac2b6519488e66bb5159febabcf539afd6e"
+checksum = "6158b1ac381792ad11e670abbcd15db8b1737e84bfa8a7f2bd7eb41388a92530"
 dependencies = [
  "cranelift-bitset",
  "wasmtime-internal-core",
@@ -1061,17 +1060,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "trait-set"
-version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "55442dd31337ec4b06189213a6a65cc414e4ae34e4cbc7bc050fae1573d14ed5"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 3.0.3",
-]
-
-[[package]]
 name = "typenum"
 version = "1.20.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1085,9 +1073,9 @@ checksum = "e6e4313cd5fcd3dad5cafa179702e2b244f760991f45397d14d4ebf38247da75"
 
 [[package]]
 name = "wasmtime-internal-core"
-version = "48.0.2"
+version = "49.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8679b612a408274d91d1e0edf6baa36b63cc48d937f84dd1e7fb2fbe16a907ae"
+checksum = "2053fd1d90080e502ca4ea39d86c3528587a40220b9572a874c8b742c219a00c"
 dependencies = [
  "hashbrown 0.17.1",
  "libm",

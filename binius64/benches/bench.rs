@@ -5,9 +5,10 @@ use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 use rayon::prelude::*;
 
+use blind_xmss_binius64::setup::WiringCapacityError;
 use blind_xmss_binius64::{
     HmCommitment, MultiUser, MultiVerifier, PK_SEED_BYTES, SK_SEED_BYTES, Signer, SignerKey, User,
-    Verifier, XMSS_H, XmssSignature, build_prover_setup, build_prover_setup_multi,
+    Verifier, XmssSignature, build_prover_setup, build_prover_setup_multi,
     build_verifier_setup, build_verifier_setup_multi, write_blind_sig, write_commitment,
     write_signer_keys, write_signer_pub, write_xmss_sig,
 };
@@ -157,12 +158,12 @@ fn bench_single(iters: usize) -> (f64, f64, usize) {
     (prove_s, verify_s, proof_bytes)
 }
 
-fn bench_multi(n: usize, iters: usize) -> (f64, f64, usize) {
+fn bench_multi(n: usize, iters: usize) -> anyhow::Result<(f64, f64, usize)> {
     let mut rng = StdRng::seed_from_u64(SEED ^ 0x55);
     let doc = make_document(&mut rng);
 
-    let (setup, zk_prover) = build_prover_setup_multi(n).expect("multi prover setup");
-    let zk_verifier = build_verifier_setup_multi(n).expect("multi verifier setup");
+    let (setup, zk_prover) = build_prover_setup_multi(n)?;
+    let zk_verifier = build_verifier_setup_multi(n)?;
 
     let mut user = MultiUser::with_setup(Arc::new(setup), Arc::new(zk_prover), &mut rng);
     let com = user.commit(&doc);
@@ -184,7 +185,7 @@ fn bench_multi(n: usize, iters: usize) -> (f64, f64, usize) {
         verifier.verify(&sig, &doc).expect("verify failed");
     });
 
-    (prove_s, verify_s, sig.proof.len())
+    Ok((prove_s, verify_s, sig.proof.len()))
 }
 
 fn main() {
@@ -218,7 +219,14 @@ fn main() {
         let (prove_s, verify_s, size) = if n == 1 {
             (prove_1, verify_1, size_1)
         } else {
-            bench_multi(n, multi_iters)
+            match bench_multi(n, multi_iters) {
+                Ok(result) => result,
+                Err(err) if err.is::<WiringCapacityError>() => {
+                    println!("    {n:>5} unsupported: {err}");
+                    break;
+                }
+                Err(err) => panic!("multi-signer benchmark failed: {err:#}"),
+            }
         };
         println!(
             "    {n:>5} {:>15.2} KB {prove_s:>22.3} {verify_s:>24.3}",
