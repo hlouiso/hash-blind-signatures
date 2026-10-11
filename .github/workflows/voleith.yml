@@ -1,0 +1,59 @@
+name: voleith
+
+on:
+  push:
+    branches: [main]
+    paths: ['voleith/**', '.github/workflows/voleith.yml']
+  pull_request:
+    paths: ['voleith/**', '.github/workflows/voleith.yml']
+  workflow_dispatch:
+
+concurrency:
+  group: voleith-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install LLVM (macOS)
+        if: runner.os == 'macOS'
+        run: brew install llvm
+
+      - name: Install libc++ (Ubuntu)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libc++-dev libc++abi-dev
+
+      - name: Configure
+        shell: bash
+        run: |
+          if [[ "$RUNNER_OS" == "macOS" ]]; then
+            LLVM_PREFIX="$(brew --prefix llvm)"
+            CC="$LLVM_PREFIX/bin/clang"
+            CXX="$LLVM_PREFIX/bin/clang++"
+          else
+            CC=clang
+            CXX=clang++
+            export CXXFLAGS="-stdlib=libc++"
+          fi
+
+          cmake -S voleith -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_COMPILER="$CC" \
+            -DCMAKE_CXX_COMPILER="$CXX"
+
+      - name: Build
+        run: cmake --build build --parallel 4
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure

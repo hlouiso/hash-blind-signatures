@@ -1,9 +1,9 @@
 # Hash-Based Blind Signatures
 
-Three implementations of the hash-based **blind (multi)signature** scheme
+Four implementations of the hash-based **blind (multi)signature** scheme
 described in the accompanying paper.
 
-All three share a **Halevi–Micali statistically-hiding commitment** over
+All four share a **Halevi–Micali statistically-hiding commitment** over
 GF(2¹²⁸) and one **target-sum WOTS+/XMSS** parameter set at tree height 10, and prove
 the same statement: that the user holds a valid XMSS signature on a commitment
 opening to the message. The commitment, the signature and the leaf index all
@@ -14,7 +14,8 @@ instantiations differ in the proof system underneath:
 |---|---|---|---|---|
 | [`binius64/`](binius64/) | [Binius64](https://github.com/binius-zk/binius64) | BLAKE3 | Rust | Fastest; also implements the blind **multi-signature** |
 | [`kkw/`](kkw/) |[KKW](https://eprint.iacr.org/2018/475) | BLAKE3 | C | |
-| [`longfellow/`](longfellow/) | [Longfellow ZK](https://github.com/google/longfellow-zk) | SHA-256 | C++ | Smallest proofs of the three |
+| [`longfellow/`](longfellow/) | [Longfellow ZK](https://github.com/google/longfellow-zk) | SHA-256 | C++ | Smallest proofs |
+| [`voleith/`](voleith/) | VOLE-in-the-head / QuickSilver | SHAKE256 | C/C++ | |
 
 Each directory is self-contained, with its own build system, tests, benchmarks
 and README. Measured sizes and timings are in the paper.
@@ -24,7 +25,7 @@ and README. Measured sizes and timings are in the paper.
 ## AI-use disclosure
 
 Large language models provided by Anthropic and OpenAI were used as assistive
-tools to review and improve the mathematical proofs and all three software
+tools to review and improve the mathematical proofs and all four software
 implementations.
 The models were not treated as authors or as authoritative sources. The human
 authors reviewed all model-assisted changes, checked citations against the cited
@@ -33,7 +34,7 @@ attribution, and reproducibility of the paper and its implementations.
 
 ## The `blindsig` CLI
 
-All three build one binary, `blindsig`, exposing the protocol as the same five
+All four build one binary, `blindsig`, exposing the protocol as the same five
 commands over the same artefact files, so a session reads identically whichever
 proof system is underneath:
 
@@ -64,6 +65,7 @@ them into a single proof.
 | `binius64/` | `cargo build --release --bin blindsig` | `target/release/blindsig` |
 | `kkw/` | `make -C kkw N=16 cli` | `kkw/build/n16-w16/blindsig` |
 | `longfellow/` | `cmake --build build -j` | `build/blindsig` |
+| `voleith/` | `cmake -S . -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build -j` | `build/blindsig` |
 
 ## Benchmarks
 
@@ -71,9 +73,10 @@ One command per implementation reproduces every figure that implementation contr
 
 | Directory | Command | Also produces |
 |---|---|---|
-| `binius64/` | `RUSTFLAGS="-C target-cpu=native" cargo bench` | the multi-signature sweep, n = 1…64 |
+| `binius64/` | `RUSTFLAGS="-C target-cpu=native" RAYON_NUM_THREADS=8 BENCH_MULTI_ITERS=10 cargo bench --bench bench --locked` | the multi-signature sweep, n = 1…32; reports the upstream capacity limit at n = 64 |
 | `kkw/` | `make -C kkw bench` | the MPC-party sweep, N = 4…64 |
 | `longfellow/` | `./build/bench [iters]` | |
+| `voleith/` | `./build/bench [iters] [height]` | defaults: 10 iterations, height 10 |
 
 
 ## License
