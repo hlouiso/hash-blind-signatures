@@ -15,7 +15,7 @@ instantiations differ in the proof system underneath:
 | [`binius64/`](binius64/) | [Binius64](https://github.com/binius-zk/binius64) | BLAKE3 | Rust | Fastest; also implements the blind **multi-signature** |
 | [`kkw/`](kkw/) |[KKW](https://eprint.iacr.org/2018/475) | BLAKE3 | C | |
 | [`longfellow/`](longfellow/) | [Longfellow ZK](https://github.com/google/longfellow-zk) | SHA-256 | C++ | Smallest proofs |
-| [`voleith/`](voleith/) | VOLE-in-the-head / QuickSilver | SHAKE256 | C/C++ | |
+| [`voleith/`](voleith/) | [VOLE-in-the-head](https://eprint.iacr.org/2023/996) | SHAKE256 | C/C++ | |
 
 Each directory is self-contained, with its own build system, tests, benchmarks
 and README. Measured sizes and timings are in the paper.
