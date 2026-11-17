@@ -236,7 +236,7 @@ int cmd_verify(const Options& opt) {
   const bool ok = verify_blind_sig(F, *circuit, xmss_root, pk_seed, bsig, msg);
   const double verify_ms = ms_since(t0);
 
-  std::printf("  [%s]  %.1f KB  %.0f ms\n", ok ? "PASS" : "FAIL",
+  std::printf("  [%s]  %.1f KiB  %.0f ms\n", ok ? "PASS" : "FAIL",
               bsig.proof.size() / 1024.0, verify_ms);
   return ok ? 0 : 1;
 }

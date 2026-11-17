@@ -46,10 +46,10 @@ fn print_size(label: &str, bytes: usize) {
     if bytes < 1024 {
         println!("    {label:<38} {bytes:>10} B");
     } else if bytes < 1024 * 1024 {
-        println!("    {label:<38} {:>9.2} KB", bytes as f64 / 1024.0);
+        println!("    {label:<38} {:>8.2} KiB", bytes as f64 / 1024.0);
     } else {
         println!(
-            "    {label:<38} {:>9.2} MB",
+            "    {label:<38} {:>8.2} MiB",
             bytes as f64 / (1024.0 * 1024.0)
         );
     }
@@ -229,7 +229,7 @@ fn main() {
             }
         };
         println!(
-            "    {n:>5} {:>15.2} KB {prove_s:>22.3} {verify_s:>24.3}",
+            "    {n:>5} {:>14.2} KiB {prove_s:>22.3} {verify_s:>24.3}",
             size as f64 / 1024.0
         );
         if n >= max_signers {

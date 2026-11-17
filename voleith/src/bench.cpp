@@ -29,7 +29,7 @@ void print_size(const char* label, size_t bytes) {
   if (bytes < 1024)
     std::printf("    %-38s %10zu B\n", label, bytes);
   else
-    std::printf("    %-38s %9.2f KB\n", label, bytes / 1024.0);
+    std::printf("    %-38s %8.2f KiB\n", label, bytes / 1024.0);
 }
 }
 

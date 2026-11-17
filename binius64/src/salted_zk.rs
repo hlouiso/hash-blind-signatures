@@ -14,7 +14,6 @@ use binius_field::{BinaryField, Field, Ghash128b as B128, PackedField, Random};
 use binius_hash::{HashSuite, StdHashSuite};
 use binius_hash_prover::ParallelHashSuite;
 use binius_iop::{
-    channel::{OracleSchedule, merge::MergeVerifierChannel},
     merkle_channel::{
         Error as MerkleChannelError, MerkleIPVerifierChannel, TranscriptMerkleCommitment,
     },
@@ -22,7 +21,6 @@ use binius_iop::{
 };
 use binius_iop_prover::{
     basefold::compiler::BaseFoldProverCompiler,
-    channel::merge::MergeProverChannel,
     merkle_channel::MerkleIPProverChannel,
     merkle_tree::{MerkleTreeProver, prover::BinaryMerkleTreeProver},
 };
@@ -466,7 +464,6 @@ pub struct SaltedZkProver {
     inner_iop_verifier: IOPVerifier,
     outer_iop_prover: SpartanIOPProver<B128>,
     outer_layout: Arc<WitnessLayout<B128>>,
-    oracle_schedule: OracleSchedule,
     basefold_compiler: BaseFoldProverCompiler<OptimalPackedB128, ProverNtt>,
     pool: BufferPool,
 }
@@ -496,7 +493,6 @@ impl SaltedZkProver {
             inner_iop_verifier,
             outer_iop_prover,
             outer_layout,
-            oracle_schedule: zk_verifier.oracle_schedule().clone(),
             basefold_compiler,
             pool: BufferPool::new(),
         })
@@ -525,7 +521,7 @@ impl SaltedZkProver {
             self.basefold_compiler
                 .create_channel(merkle_channel, &mut rng, alloc);
         let mut wrapped_channel = ZKWrappedProverChannel::new(
-            MergeProverChannel::new(basefold_channel, &self.oracle_schedule, alloc),
+            basefold_channel,
             &self.outer_iop_prover,
             Arc::clone(&self.outer_layout),
             &alloc,
@@ -565,7 +561,7 @@ pub fn verify_salted<Challenger_: Challenger>(
         .basefold_compiler()
         .create_channel(merkle_channel);
     let mut wrapped_channel = ZKWrappedVerifierChannel::new(
-        MergeVerifierChannel::new(basefold_channel, zk_verifier.oracle_schedule()),
+        basefold_channel,
         zk_verifier.outer_iop_verifier(),
         zk_verifier.outer_layout_arc(),
     )?;

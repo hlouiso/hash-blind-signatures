@@ -208,9 +208,9 @@ static void print_size(const char *label, double bytes)
     if (bytes < 1024.0)
         printf("    %-38s %10.0f B\n", label, bytes);
     else if (bytes < 1024.0 * 1024.0)
-        printf("    %-38s %9.2f KB\n", label, bytes / 1024.0);
+        printf("    %-38s %8.2f KiB\n", label, bytes / 1024.0);
     else
-        printf("    %-38s %9.2f MB\n", label, bytes / (1024.0 * 1024.0));
+        printf("    %-38s %8.2f MiB\n", label, bytes / (1024.0 * 1024.0));
 }
 
 int main(int argc, char *argv[])
@@ -240,7 +240,7 @@ int main(int argc, char *argv[])
 
     if (row_only)
     {
-        printf("    %5d %5d %5d %11.2f MB %14.3f %16.3f\n", N_PARTIES, M_KKW, NUM_ROUNDS,
+        printf("    %5d %5d %5d %10.2f MiB %14.3f %16.3f\n", N_PARTIES, M_KKW, NUM_ROUNDS,
                r.proof_bytes / (1024.0 * 1024.0), r.prove_s, r.verify_s);
         return 0;
     }

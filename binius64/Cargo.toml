@@ -16,25 +16,25 @@ path = "src/bin/blindsig.rs"
 bench = false
 
 [dependencies]
-binius-circuits  = { git = "https://github.com/binius-zk/binius64.git", rev = "4428e759dd27956bd5b9ae5025d67eb8ccc1accf" }
-binius-compute   = { git = "https://github.com/binius-zk/binius64.git", rev = "4428e759dd27956bd5b9ae5025d67eb8ccc1accf" }
-binius-core      = { git = "https://github.com/binius-zk/binius64.git", rev = "4428e759dd27956bd5b9ae5025d67eb8ccc1accf" }
-binius-field     = { git = "https://github.com/binius-zk/binius64.git", rev = "4428e759dd27956bd5b9ae5025d67eb8ccc1accf" }
-binius-frontend  = { git = "https://github.com/binius-zk/binius64.git", rev = "4428e759dd27956bd5b9ae5025d67eb8ccc1accf" }
-binius-hash      = { git = "https://github.com/binius-zk/binius64.git", rev = "4428e759dd27956bd5b9ae5025d67eb8ccc1accf" }
-binius-hash-prover = { git = "https://github.com/binius-zk/binius64.git", rev = "4428e759dd27956bd5b9ae5025d67eb8ccc1accf" }
-binius-iop       = { git = "https://github.com/binius-zk/binius64.git", rev = "4428e759dd27956bd5b9ae5025d67eb8ccc1accf" }
-binius-iop-prover = { git = "https://github.com/binius-zk/binius64.git", rev = "4428e759dd27956bd5b9ae5025d67eb8ccc1accf" }
-binius-ip        = { git = "https://github.com/binius-zk/binius64.git", rev = "4428e759dd27956bd5b9ae5025d67eb8ccc1accf" }
-binius-ip-prover = { git = "https://github.com/binius-zk/binius64.git", rev = "4428e759dd27956bd5b9ae5025d67eb8ccc1accf" }
-binius-math      = { git = "https://github.com/binius-zk/binius64.git", rev = "4428e759dd27956bd5b9ae5025d67eb8ccc1accf" }
-binius-prover    = { git = "https://github.com/binius-zk/binius64.git", rev = "4428e759dd27956bd5b9ae5025d67eb8ccc1accf" }
-binius-spartan-frontend = { git = "https://github.com/binius-zk/binius64.git", rev = "4428e759dd27956bd5b9ae5025d67eb8ccc1accf" }
-binius-spartan-prover = { git = "https://github.com/binius-zk/binius64.git", rev = "4428e759dd27956bd5b9ae5025d67eb8ccc1accf" }
-binius-spartan-verifier = { git = "https://github.com/binius-zk/binius64.git", rev = "4428e759dd27956bd5b9ae5025d67eb8ccc1accf" }
-binius-transcript = { git = "https://github.com/binius-zk/binius64.git", rev = "4428e759dd27956bd5b9ae5025d67eb8ccc1accf" }
-binius-utils     = { git = "https://github.com/binius-zk/binius64.git", rev = "4428e759dd27956bd5b9ae5025d67eb8ccc1accf" }
-binius-verifier  = { git = "https://github.com/binius-zk/binius64.git", rev = "4428e759dd27956bd5b9ae5025d67eb8ccc1accf" }
+binius-circuits  = { git = "https://github.com/binius-zk/binius64.git", rev = "4cbfa5ac4f58e2914403713f527d9fda600e06a3" }
+binius-compute   = { git = "https://github.com/binius-zk/binius64.git", rev = "4cbfa5ac4f58e2914403713f527d9fda600e06a3" }
+binius-core      = { git = "https://github.com/binius-zk/binius64.git", rev = "4cbfa5ac4f58e2914403713f527d9fda600e06a3" }
+binius-field     = { git = "https://github.com/binius-zk/binius64.git", rev = "4cbfa5ac4f58e2914403713f527d9fda600e06a3" }
+binius-frontend  = { git = "https://github.com/binius-zk/binius64.git", rev = "4cbfa5ac4f58e2914403713f527d9fda600e06a3" }
+binius-hash      = { git = "https://github.com/binius-zk/binius64.git", rev = "4cbfa5ac4f58e2914403713f527d9fda600e06a3" }
+binius-hash-prover = { git = "https://github.com/binius-zk/binius64.git", rev = "4cbfa5ac4f58e2914403713f527d9fda600e06a3" }
+binius-iop       = { git = "https://github.com/binius-zk/binius64.git", rev = "4cbfa5ac4f58e2914403713f527d9fda600e06a3" }
+binius-iop-prover = { git = "https://github.com/binius-zk/binius64.git", rev = "4cbfa5ac4f58e2914403713f527d9fda600e06a3" }
+binius-ip        = { git = "https://github.com/binius-zk/binius64.git", rev = "4cbfa5ac4f58e2914403713f527d9fda600e06a3" }
+binius-ip-prover = { git = "https://github.com/binius-zk/binius64.git", rev = "4cbfa5ac4f58e2914403713f527d9fda600e06a3" }
+binius-math      = { git = "https://github.com/binius-zk/binius64.git", rev = "4cbfa5ac4f58e2914403713f527d9fda600e06a3" }
+binius-prover    = { git = "https://github.com/binius-zk/binius64.git", rev = "4cbfa5ac4f58e2914403713f527d9fda600e06a3" }
+binius-spartan-frontend = { git = "https://github.com/binius-zk/binius64.git", rev = "4cbfa5ac4f58e2914403713f527d9fda600e06a3" }
+binius-spartan-prover = { git = "https://github.com/binius-zk/binius64.git", rev = "4cbfa5ac4f58e2914403713f527d9fda600e06a3" }
+binius-spartan-verifier = { git = "https://github.com/binius-zk/binius64.git", rev = "4cbfa5ac4f58e2914403713f527d9fda600e06a3" }
+binius-transcript = { git = "https://github.com/binius-zk/binius64.git", rev = "4cbfa5ac4f58e2914403713f527d9fda600e06a3" }
+binius-utils     = { git = "https://github.com/binius-zk/binius64.git", rev = "4cbfa5ac4f58e2914403713f527d9fda600e06a3" }
+binius-verifier  = { git = "https://github.com/binius-zk/binius64.git", rev = "4cbfa5ac4f58e2914403713f527d9fda600e06a3" }
 
 anyhow  = "1"
 blake3  = "1"
@@ -49,6 +49,7 @@ bincode = "1"
 
 [dev-dependencies]
 hex = "0.4"
+bytes = "1"
 
 [[bench]]
 name    = "bench"
