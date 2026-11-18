@@ -1,5 +1,5 @@
-//! Single-signer circuit setup. Public inputs are m_hat || pk_seed || root;
-//! the commitment opening, XMSS signature, and epoch are witnesses.
+//! Single-signer circuit setup. Public inputs are m_hat || pk_seed || root ||
+//! epoch mask; the commitment opening, XMSS signature, and epoch are witnesses.
 //! Binius64 fixes the BaseFold component at 96-bit security.
 
 use binius_core::constraint_system::{ConstraintSystem, InoutSegment};
@@ -17,7 +17,10 @@ use crate::salted_zk::SaltedZkProver;
 
 pub const LOG_INV_RATE: usize = 2;
 
-pub const N_INOUT: usize = BLIND_COMMIT_INOUTS + DIGEST_WIRES;
+pub const N_INOUT: usize = BLIND_COMMIT_INOUTS + DIGEST_WIRES + 1;
+
+/// Index of the epoch-mask word among the public inputs.
+pub const EPOCH_MASK_INOUT: usize = BLIND_COMMIT_INOUTS + DIGEST_WIRES;
 
 pub type BlindZkVerifier = ZKVerifier<StdHashSuite>;
 
@@ -121,16 +124,24 @@ fn build_circuit() -> (binius_frontend::Circuit, ConstraintSystem, CircuitFields
     let commit = BlindCommitGadget::new(&b);
 
     let xmss_root_wires: [Wire; DIGEST_WIRES] = std::array::from_fn(|_| b.add_inout());
+    let epoch_mask_wire = b.add_inout();
 
-    let xmss_verify =
-        XmssVerifyGadget::new(&b, &commit.domain_param, commit.com_d(), &xmss_root_wires);
+    let xmss_verify = XmssVerifyGadget::new(
+        &b,
+        &commit.domain_param,
+        commit.com_d(),
+        &xmss_root_wires,
+        epoch_mask_wire,
+    );
 
     let prefix = commit.inout_wires();
     let inout_wires: [Wire; N_INOUT] = std::array::from_fn(|i| {
         if i < BLIND_COMMIT_INOUTS {
             prefix[i]
-        } else {
+        } else if i < EPOCH_MASK_INOUT {
             xmss_root_wires[i - BLIND_COMMIT_INOUTS]
+        } else {
+            epoch_mask_wire
         }
     });
 

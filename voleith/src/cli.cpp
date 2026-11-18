@@ -150,7 +150,7 @@ int main(int argc, char** argv) try {
     write(dir / "xmss_sig.bin", encode(response));
     std::cout << "Consumed XMSS leaf " << response.leaf_index << '\n';
   } else if (command == "prove") {
-    auto pk = decode_public(read(dir / "signer_pub.bin", 40));
+    auto pk = decode_public(read(dir / "signer_pub.bin", 41));
     auto state = decode_state(read(dir / "user_state.bin", 392));
     auto response =
         decode_response(read(dir / "xmss_sig.bin", 8 + XMSS_SIG_BYTES));
@@ -158,7 +158,7 @@ int main(int argc, char** argv) try {
     write(dir / "blind_sig.bin", signature);
     std::cout << "Blind signature: " << signature.size() << " bytes\n";
   } else if (command == "verify") {
-    auto pk = decode_public(read(dir / "signer_pub.bin", 40));
+    auto pk = decode_public(read(dir / "signer_pub.bin", 41));
     if (!verify_signature(pk, read(message),
                           read(dir / "blind_sig.bin", proof_layout().size))) {
       std::cerr << "[FAIL]\n";

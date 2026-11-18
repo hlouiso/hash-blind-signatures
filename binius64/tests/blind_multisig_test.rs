@@ -46,10 +46,13 @@ fn blind_multisig_full_roundtrip() {
         .prove(&signatures)
         .expect("multi-sig proof generation failed");
 
-    let verifier = MultiVerifier::new(collect_roots(&signers), pk_seed);
+    let verifier = MultiVerifier::new(collect_roots(&signers), pk_seed, TEST_H);
     verifier
         .verify(&blind_sig, &message)
         .expect("honest blind multi-signature must verify");
+    MultiVerifier::new(collect_roots(&signers), pk_seed, TEST_H - 1)
+        .verify(&blind_sig, &message)
+        .expect_err("the verifier must bind the signers' height");
 
     for suffix in [&[0u8][..], b"trailing proof data".as_slice()] {
         let original_len = blind_sig.proof.len();
@@ -60,7 +63,7 @@ fn blind_multisig_full_roundtrip() {
         blind_sig.proof.truncate(original_len);
     }
 
-    let previous_label = b"blind-xmss-binius64-multisig-v8-salted-ghash";
+    let previous_label = b"blind-xmss-binius64-multisig-v9-salted-ghash";
     blind_sig.proof[..previous_label.len()].copy_from_slice(previous_label);
     assert!(matches!(
         verifier.verify(&blind_sig, &message),
@@ -83,7 +86,7 @@ fn blind_multisig_varying_n() {
         let (signers, signatures) = run_signing(&mut rng, &pk_seed, &com, n);
         let blind_sig = user.prove(&signatures).expect("prove failed");
 
-        let verifier = MultiVerifier::new(collect_roots(&signers), pk_seed);
+        let verifier = MultiVerifier::new(collect_roots(&signers), pk_seed, TEST_H);
         verifier
             .verify(&blind_sig, b"varying-n")
             .unwrap_or_else(|e| panic!("n={n}: verify failed: {e}"));
@@ -154,7 +157,7 @@ fn rejects_swapped_signatures() {
 
     match user.prove(&signatures) {
         Ok(blind_sig) => {
-            let verifier = MultiVerifier::new(roots, pk_seed);
+            let verifier = MultiVerifier::new(roots, pk_seed, TEST_H);
             verifier
                 .verify(&blind_sig, b"swap test")
                 .expect_err("swapped signatures must be rejected by the verifier");
@@ -179,7 +182,7 @@ fn rejects_wrong_root() {
     let mut roots = collect_roots(&signers);
     *roots.last_mut().unwrap() = [0xAAu8; blind_xmss_binius64::DIGEST_LEN];
 
-    let bad_verifier = MultiVerifier::new(roots, pk_seed);
+    let bad_verifier = MultiVerifier::new(roots, pk_seed, TEST_H);
     bad_verifier
         .verify(&blind_sig, message)
         .expect_err("verifier with one wrong root must reject");

@@ -43,6 +43,7 @@ static void fill_parts(NativeWitness& w, const Field& F,
   w.com_d = hm_com_digest(com);
   std::memcpy(w.domain_param, dp.data(), kDomainParamLen);
   w.xmss_root = sig.root;
+  w.leaf_mask = leaf_index_mask(sig.height);
 
   std::memcpy(w.nonce, sig.wots.nonce.data(), kNonceLength);
   w.message_hash = sig.wots.message_hash;

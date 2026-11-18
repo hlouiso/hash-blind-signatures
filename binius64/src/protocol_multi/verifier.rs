@@ -4,7 +4,7 @@ use binius_core::word::Word;
 use binius_verifier::config::StdChallenger;
 use binius_verifier::transcript::VerifierTranscript;
 
-use crate::gadgets::{build_blind_commit_public_words, bytes16_to_words};
+use crate::gadgets::{build_blind_commit_public_words, bytes16_to_words, epoch_mask};
 use crate::hashes::Digest;
 use crate::protocol::{FS_NONCE_BYTES, verifier::UnifiedVerifyError};
 use crate::salted_zk::verify_salted;
@@ -14,28 +14,32 @@ use crate::wots::PK_SEED_BYTES;
 
 use super::{BlindMultiSigError, BlindMultiSignature};
 
+/// Verifies under n roots that share one pk_seed and one real height.
 pub struct MultiVerifier {
     zk_verifier: Arc<BlindZkVerifier>,
     roots: Vec<Digest>,
     pk_seed: [u8; PK_SEED_BYTES],
+    epoch_mask: Word,
 }
 
 impl MultiVerifier {
-    pub fn new(roots: Vec<Digest>, pk_seed: [u8; PK_SEED_BYTES]) -> Self {
+    pub fn new(roots: Vec<Digest>, pk_seed: [u8; PK_SEED_BYTES], height: usize) -> Self {
         let zk_verifier = build_verifier_setup_multi(roots.len())
             .expect("failed to build multi-sig verifier setup");
-        Self::with_zk_verifier(Arc::new(zk_verifier), roots, pk_seed)
+        Self::with_zk_verifier(Arc::new(zk_verifier), roots, pk_seed, height)
     }
 
     pub fn with_zk_verifier(
         zk_verifier: Arc<BlindZkVerifier>,
         roots: Vec<Digest>,
         pk_seed: [u8; PK_SEED_BYTES],
+        height: usize,
     ) -> Self {
         MultiVerifier {
             zk_verifier,
             roots,
             pk_seed,
+            epoch_mask: epoch_mask(height),
         }
     }
 
@@ -90,6 +94,7 @@ impl MultiVerifier {
         for root in &self.roots {
             inouts.extend_from_slice(&bytes16_to_words(root));
         }
+        inouts.push(self.epoch_mask);
         debug_assert_eq!(inouts.len(), n_inout_multi(self.roots.len()));
 
         assert_eq!(inouts.len(), self.zk_verifier.constraint_system().n_inout);

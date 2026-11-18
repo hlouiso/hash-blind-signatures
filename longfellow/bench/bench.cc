@@ -60,9 +60,10 @@ int run(int iters) {
     krng.fill_bytes(key.pk_seed.data(), key.pk_seed.size());
     key.height = static_cast<uint8_t>(kBenchXmssH);
     key.next_leaf = 0;
-    const Node xmss_root =
+    const SignerPub pub{
         XmssKeyPair::generate_from_seed(key.sk_seed, key.pk_seed, kBenchXmssH)
-            .public_key();
+            .public_key(),
+        key.pk_seed, key.height};
 
     DeterministicRng urng(0x1000 + it);
     UserState state;
@@ -81,11 +82,10 @@ int run(int iters) {
     if (bsig.proof.empty()) { all_ok = false; break; }
 
     t0 = Clock::now();
-    all_ok &= verify_blind_sig(F, *circuit, xmss_root, key.pk_seed, bsig,
-                               message);
+    all_ok &= verify_blind_sig(F, *circuit, pub, bsig, message);
     verify_s += s_since(t0);
 
-    pk_bytes = write_signer_pub(xmss_root, key.pk_seed).size();
+    pk_bytes = write_signer_pub(pub).size();
     sk_bytes = write_signer_key(key).size();
     com_bytes = write_commitment(com).size();
     sig_bytes = write_xmss_sig(*xmss_sig).size();

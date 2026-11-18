@@ -28,6 +28,13 @@ constexpr size_t kSkSeedBytes = 32;
 
 using AuthPath = std::array<Node, kXmssH>;
 
+/* The bits of a leaf index at or above the real height h. An index with any of
+ * them set climbs into the seed-derived siblings instead of the real tree, so
+ * the verifier and the circuit reject it. */
+constexpr uint32_t leaf_index_mask(size_t height) {
+  return static_cast<uint32_t>(~((uint64_t{1} << height) - 1));
+}
+
 struct TreeHashCall {
   Node left;
   Node right;
@@ -43,6 +50,8 @@ struct XmssSignature {
   AuthPath auth_path;
   std::vector<TreeHashCall> xmss_calls;
   Node root;
+  /* The real height h from the public key; leaf_index < 2^h. */
+  uint8_t height;
   uint32_t leaf_index;
 };
 
@@ -51,13 +60,13 @@ std::pair<Node, std::vector<TreeHashCall>> xmss_auth_path(
     const AuthPath& auth_path);
 
 bool xmss_verify(const WinternitzSpec& spec, const PkSeed& pk_seed,
-                 const Node& expected_root, uint32_t leaf_index,
+                 const Node& expected_root, size_t height, uint32_t leaf_index,
                  const uint8_t* message, size_t message_len,
                  const Bytes& nonce, const std::vector<Node>& sig_hashes,
                  const AuthPath& auth_path);
 
 std::optional<XmssSignature> xmss_expand(const WinternitzSpec& spec,
-                                         const PkSeed& pk_seed,
+                                         const PkSeed& pk_seed, size_t height,
                                          uint32_t leaf_index,
                                          const Bytes& nonce,
                                          const std::vector<Node>& sig_hashes,

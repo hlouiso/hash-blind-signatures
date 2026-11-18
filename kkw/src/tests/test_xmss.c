@@ -137,7 +137,7 @@ int main(void)
         if (sum != XMSS_TARGET_SUM)
             all_target = 0;
 
-        if (!xmss_verify(pk_seed, root1, msg, sizeof msg, &sig))
+        if (!xmss_verify(pk_seed, root1, XMSS_TEST_H, msg, sizeof msg, &sig))
             all_valid = 0;
     }
     CHECK(all_target, "grind always lands on the target sum");
@@ -152,7 +152,7 @@ int main(void)
             test_random_bytes(msg, sizeof msg);
             xmss_sig sig;
             if (!xmss_keypair_sign(kp, leaf, msg, sizeof msg, &sig) ||
-                !xmss_verify(pk_seed, root1, msg, sizeof msg, &sig))
+                !xmss_verify(pk_seed, root1, XMSS_TEST_H, msg, sizeof msg, &sig))
                 all_ground = 0;
         }
         CHECK(all_ground, "grinding succeeds over 100 signatures");
@@ -207,34 +207,44 @@ int main(void)
         }
         else
         {
-            CHECK(xmss_verify(pk_seed, root1, msg, sizeof msg, &sig), "baseline valid before tampering");
+            CHECK(xmss_verify(pk_seed, root1, XMSS_TEST_H, msg, sizeof msg, &sig), "baseline valid before tampering");
 
             xmss_sig bad = sig;
             bad.sig_hashes[3][0] ^= 0x01;
-            CHECK(!xmss_verify(pk_seed, root1, msg, sizeof msg, &bad), "tampered sig_hash rejected");
+            CHECK(!xmss_verify(pk_seed, root1, XMSS_TEST_H, msg, sizeof msg, &bad), "tampered sig_hash rejected");
 
             bad = sig;
             bad.auth_path[2][0] ^= 0x01;
-            CHECK(!xmss_verify(pk_seed, root1, msg, sizeof msg, &bad), "tampered auth path rejected");
+            CHECK(!xmss_verify(pk_seed, root1, XMSS_TEST_H, msg, sizeof msg, &bad), "tampered auth path rejected");
 
             bad = sig;
             bad.auth_path[XMSS_H - 1][0] ^= 0x01;
-            CHECK(!xmss_verify(pk_seed, root1, msg, sizeof msg, &bad),
+            CHECK(!xmss_verify(pk_seed, root1, XMSS_TEST_H, msg, sizeof msg, &bad),
                   "tampered upper sibling rejected");
 
             bad = sig;
             bad.leaf_index ^= 1;
-            CHECK(!xmss_verify(pk_seed, root1, msg, sizeof msg, &bad), "wrong leaf index rejected");
+            CHECK(!xmss_verify(pk_seed, root1, XMSS_TEST_H, msg, sizeof msg, &bad), "wrong leaf index rejected");
 
             uint8_t msg2[32];
             memcpy(msg2, msg, 32);
             msg2[0] ^= 0x01;
-            CHECK(!xmss_verify(pk_seed, root1, msg2, sizeof msg2, &sig), "wrong message rejected");
+            CHECK(!xmss_verify(pk_seed, root1, XMSS_TEST_H, msg2, sizeof msg2, &sig), "wrong message rejected");
 
             uint8_t other_root[XMSS_NODE_BYTES];
             memcpy(other_root, root1, XMSS_NODE_BYTES);
             other_root[0] ^= 0x01;
-            CHECK(!xmss_verify(pk_seed, other_root, msg, sizeof msg, &sig), "wrong root rejected");
+            CHECK(!xmss_verify(pk_seed, other_root, XMSS_TEST_H, msg, sizeof msg, &sig), "wrong root rejected");
+
+            /* Leaf 42 climbs to root1 whatever height is claimed: only the range
+             * check on the leaf index depends on it. */
+            CHECK(xmss_verify(pk_seed, root1, 6, msg, sizeof msg, &sig),
+                  "leaf 42 accepted at height 6");
+            CHECK(!xmss_verify(pk_seed, root1, 5, msg, sizeof msg, &sig),
+                  "leaf 42 rejected at height 5");
+            CHECK(!xmss_verify(pk_seed, root1, 0, msg, sizeof msg, &sig) &&
+                      !xmss_verify(pk_seed, root1, XMSS_H + 1, msg, sizeof msg, &sig),
+                  "heights outside [1, 32] rejected");
         }
     }
 
@@ -289,7 +299,7 @@ int main(void)
                   "round-trip preserves sig_hashes");
             CHECK(memcmp(got.auth_path, sig.auth_path, sizeof sig.auth_path) == 0,
                   "round-trip preserves auth path");
-            CHECK(xmss_verify(pk_seed, root1, msg, sizeof msg, &got),
+            CHECK(xmss_verify(pk_seed, root1, XMSS_TEST_H, msg, sizeof msg, &got),
                   "deserialized signature still verifies");
 
             uint8_t again[XMSS_SIG_BYTES];
@@ -309,7 +319,7 @@ int main(void)
             memcpy(tampered, buf, XMSS_SIG_BYTES);
             tampered[4 + XMSS_NONCE_LEN] ^= 0x01;
             CHECK(xmss_read_sig(tampered, sizeof tampered, &got) &&
-                      !xmss_verify(pk_seed, root1, msg, sizeof msg, &got),
+                      !xmss_verify(pk_seed, root1, XMSS_TEST_H, msg, sizeof msg, &got),
                   "tampered wire bytes parse but fail verification");
         }
     }
@@ -383,7 +393,7 @@ int main(void)
                     }
                     xmss_node split_root;
                     xmss_keypair_root(split, split_root);
-                    if (!split_failures && !xmss_verify(pk_seed, split_root, m, sizeof m, &sig))
+                    if (!split_failures && !xmss_verify(pk_seed, split_root, height, m, sizeof m, &sig))
                     {
                         printf("  FAIL verify h=%d sub=%d leaf %u\n", height, subtree_h, leaf);
                         split_failures++;

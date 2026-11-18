@@ -161,7 +161,7 @@ static bench_result run_pipeline(int iters, int progress)
         }
 
         t0 = now_s();
-        int rc = blind_user_prove(&st, key.pk_seed, root, &sig, proof);
+        int rc = blind_user_prove(&st, key.pk_seed, root, key.height, &sig, proof);
         prove[i] = now_s() - t0;
         if (rc != 0)
         {
@@ -173,7 +173,7 @@ static bench_result run_pipeline(int iters, int progress)
         rewind(proof);
 
         t0 = now_s();
-        int valid = blind_verify_sig(proof, msg, BENCH_MSG_LEN, key.pk_seed, root);
+        int valid = blind_verify_sig(proof, msg, BENCH_MSG_LEN, key.pk_seed, root, key.height);
         verify[i] = now_s() - t0;
         fclose(proof);
         blind_user_state_free(&st);

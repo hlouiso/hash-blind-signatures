@@ -5,7 +5,7 @@ use rand::rngs::StdRng;
 use rand::{CryptoRng, Rng, SeedableRng};
 
 use crate::commitment::{CommitmentOpening, HmCommitment, sample_commitment};
-use crate::gadgets::{BLIND_COMMIT_INOUTS, bytes16_to_words};
+use crate::gadgets::{BLIND_COMMIT_INOUTS, bytes16_to_words, epoch_mask};
 use crate::hashes::DIGEST_WIRES;
 use crate::protocol::{FS_NONCE_BYTES, UserState};
 use crate::setup::BlindZkProver;
@@ -102,6 +102,8 @@ impl MultiUser {
                 filler[w[base + i]] = word;
             }
         }
+        filler[w[BLIND_COMMIT_INOUTS + DIGEST_WIRES * n_signers]] =
+            epoch_mask(signatures[0].height);
 
         self.setup
             .circuit

@@ -66,7 +66,7 @@ void preproc_commit_instance(unsigned char seeds[N_PARTIES][SEED_SIZE],
     KKW_TH(KKW_DOM_HJ, coms, (size_t)N_PARTIES * 32, h_j_out);
 }
 
-void compute_aux_from_seeds(unsigned char seeds[N_PARTIES][SEED_SIZE],
+void compute_aux_from_seeds(unsigned char seeds[N_PARTIES][SEED_SIZE], uint32_t epoch_mask,
                             uint32_t *aux_out, unsigned char *h_out32)
 {
 
@@ -93,7 +93,7 @@ void compute_aux_from_seeds(unsigned char seeds[N_PARTIES][SEED_SIZE],
     unsigned char zero_m[32] = {0}, zero_pk[XMSS_PK_SEED_BYTES] = {0};
     a dummy_a;
     uint32_t zh_dummy[8];
-    building_views(&dummy_a, zero_m, zero_pk, d0, lam, tapes, aux_out, NULL,
+    building_views(&dummy_a, zero_m, zero_pk, epoch_mask, d0, lam, tapes, aux_out, NULL,
                    NULL, zh_dummy);
     if (h_out32)
         KKW_TH(KKW_DOM_HOUT, dummy_a.yp,
@@ -155,6 +155,7 @@ static int cmp_int(const void *a, const void *b)
 
 void kkw_fs_prefix(const unsigned char msg[32], const uint32_t pubout[8],
                    const unsigned char pk_seed[XMSS_PK_SEED_BYTES],
+                   uint32_t epoch_mask,
                    const unsigned char nonce[32],
                    const unsigned char h_star[32],
                    unsigned char h_pre[32])
@@ -166,12 +167,16 @@ void kkw_fs_prefix(const unsigned char msg[32], const uint32_t pubout[8],
         pubout_bytes[i*4+2] = (unsigned char)(pubout[i] >>  8);
         pubout_bytes[i*4+3] = (unsigned char)(pubout[i]);
     }
-    unsigned char in[32 + 32 + XMSS_PK_SEED_BYTES + 32 + 32];
+    unsigned char mask_bytes[4] = {
+        (unsigned char)(epoch_mask >> 24), (unsigned char)(epoch_mask >> 16),
+        (unsigned char)(epoch_mask >> 8), (unsigned char)epoch_mask};
+    unsigned char in[32 + 32 + XMSS_PK_SEED_BYTES + 4 + 32 + 32];
     memcpy(in,                              msg,          32);
     memcpy(in + 32,                         pubout_bytes, 32);
     memcpy(in + 64,                         pk_seed,      XMSS_PK_SEED_BYTES);
-    memcpy(in + 64 + XMSS_PK_SEED_BYTES,    nonce,        32);
-    memcpy(in + 96 + XMSS_PK_SEED_BYTES,    h_star,       32);
+    memcpy(in + 64 + XMSS_PK_SEED_BYTES,    mask_bytes,   4);
+    memcpy(in + 68 + XMSS_PK_SEED_BYTES,    nonce,        32);
+    memcpy(in + 100 + XMSS_PK_SEED_BYTES,   h_star,       32);
     KKW_TH(KKW_DOM_FS, in, sizeof in, h_pre);
 }
 

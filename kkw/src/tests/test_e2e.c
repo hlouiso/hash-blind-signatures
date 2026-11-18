@@ -39,7 +39,7 @@ static void run_parties(unsigned char input[W_END], unsigned char m_hat[32],
 
     xmss_sig sig;
     if (!xmss_sign(sk_seed, pk_seed, XMSS_TEST_H, 0, d, 32, &sig)) { printf("FAIL: xmss_sign\n"); exit(1); }
-    if (!xmss_verify(pk_seed, root, d, 32, &sig))      { printf("FAIL: native verify\n"); exit(1); }
+    if (!xmss_verify(pk_seed, root, XMSS_TEST_H, d, 32, &sig))      { printf("FAIL: native verify\n"); exit(1); }
 
     memcpy(input + W_R_OFF, r, HM_R_BYTES);
     memcpy(input + W_A_OFF, a_mat, HM_A_BYTES);
@@ -72,28 +72,38 @@ int main(void)
     FILE *proof = tmpfile();
     if (!proof) { printf("FAIL: tmpfile\n"); return 1; }
 
-    CHECK(kkw_prove(input, m_hat, pk_seed, pubout, proof) == 0, "prover produces a proof");
+    CHECK(kkw_prove(input, m_hat, pk_seed, xmss_leaf_index_mask(XMSS_TEST_H), pubout, proof) == 0, "prover produces a proof");
 
     rewind(proof);
-    CHECK(kkw_verify(proof, m_hat, pk_seed, pubout) == 0, "verify accepts the honest proof");
+    CHECK(kkw_verify(proof, m_hat, pk_seed, xmss_leaf_index_mask(XMSS_TEST_H), pubout) == 0, "verify accepts the honest proof");
 
     unsigned char bad_m[32];
     memcpy(bad_m, m_hat, 32);
     bad_m[0] ^= 0x01;
     rewind(proof);
-    CHECK(kkw_verify(proof, bad_m, pk_seed, pubout) != 0, "verify rejects a wrong message");
+    CHECK(kkw_verify(proof, bad_m, pk_seed, xmss_leaf_index_mask(XMSS_TEST_H), pubout) != 0, "verify rejects a wrong message");
 
     uint32_t bad_pubout[8];
     memcpy(bad_pubout, pubout, sizeof bad_pubout);
     bad_pubout[0] ^= 0x01;
     rewind(proof);
-    CHECK(kkw_verify(proof, m_hat, pk_seed, bad_pubout) != 0, "verify rejects a forged public key");
+    CHECK(kkw_verify(proof, m_hat, pk_seed, xmss_leaf_index_mask(XMSS_TEST_H), bad_pubout) != 0, "verify rejects a forged public key");
 
     memcpy(bad_pubout, pubout, sizeof bad_pubout);
     bad_pubout[YP_POOL_WORD] = 1;
     rewind(proof);
-    CHECK(kkw_verify(proof, m_hat, pk_seed, bad_pubout) != 0,
+    CHECK(kkw_verify(proof, m_hat, pk_seed, xmss_leaf_index_mask(XMSS_TEST_H), bad_pubout) != 0,
           "proof binds the public pool check to zero");
+
+    memcpy(bad_pubout, pubout, sizeof bad_pubout);
+    bad_pubout[YP_EPOCH_WORD] = 1;
+    rewind(proof);
+    CHECK(kkw_verify(proof, m_hat, pk_seed, xmss_leaf_index_mask(XMSS_TEST_H), bad_pubout) != 0,
+          "proof binds the public epoch check to zero");
+
+    rewind(proof);
+    CHECK(kkw_verify(proof, m_hat, pk_seed, xmss_leaf_index_mask(XMSS_TEST_H - 1), pubout) != 0,
+          "proof binds the epoch mask");
 
     {
         fseek(proof, 0, SEEK_END);
@@ -133,7 +143,7 @@ int main(void)
                 printf("FAIL: tamper write\n"); return 1;
             }
             rewind(tampered);
-            if (kkw_verify(tampered, m_hat, pk_seed, pubout) == 0) {
+            if (kkw_verify(tampered, m_hat, pk_seed, xmss_leaf_index_mask(XMSS_TEST_H), pubout) == 0) {
                 printf("  FAIL byte flip at offset %ld ACCEPTED\n", offsets[i]);
                 all_rejected = 0;
             }
@@ -149,7 +159,7 @@ int main(void)
             printf("FAIL: padded write\n"); return 1;
         }
         rewind(padded);
-        CHECK(kkw_verify(padded, m_hat, pk_seed, pubout) != 0,
+        CHECK(kkw_verify(padded, m_hat, pk_seed, xmss_leaf_index_mask(XMSS_TEST_H), pubout) != 0,
               "verify rejects a proof with trailing data");
         fclose(padded);
 
@@ -160,7 +170,7 @@ int main(void)
             printf("FAIL: legacy write\n"); return 1;
         }
         rewind(legacy);
-        CHECK(kkw_verify(legacy, m_hat, pk_seed, pubout) != 0,
+        CHECK(kkw_verify(legacy, m_hat, pk_seed, xmss_leaf_index_mask(XMSS_TEST_H), pubout) != 0,
               "verify rejects the legacy raw-compression proof format");
         fclose(legacy);
         free(buf);
@@ -189,17 +199,30 @@ int main(void)
 
         FILE *p2 = tmpfile();
         if (!p2) { printf("FAIL: tmpfile\n"); return 1; }
-        CHECK(blind_user_prove(&st, key.pk_seed, root, &sig2, p2) == 0,
+        CHECK(blind_user_prove(&st, key.pk_seed, root, key.height, &sig2, p2) == 0,
               "user proves at a non-zero leaf");
         rewind(p2);
-        CHECK(blind_verify_sig(p2, (const unsigned char *)msg, msg_len, key.pk_seed, root) == 1,
+        CHECK(blind_verify_sig(p2, (const unsigned char *)msg, msg_len, key.pk_seed, root, key.height) == 1,
               "verify accepts the honest proof at a non-zero leaf");
 
         rewind(p2);
         CHECK(blind_verify_sig(p2, (const unsigned char *)"another document", 16,
-                               key.pk_seed, root) == 0,
+                               key.pk_seed, root, key.height) == 0,
               "verify rejects a different message");
+
+        rewind(p2);
+        CHECK(blind_verify_sig(p2, (const unsigned char *)msg, msg_len, key.pk_seed, root,
+                               key.height - 1) == 0,
+              "verify rejects the proof under a different height");
         fclose(p2);
+
+        /* Leaf 3 climbs to the same root whatever height the verifier assumes;
+         * under height 1 only the epoch check rules it out. */
+        FILE *p3 = tmpfile();
+        if (!p3) { printf("FAIL: tmpfile\n"); return 1; }
+        CHECK(blind_user_prove(&st, key.pk_seed, root, 1, &sig2, p3) != 0,
+              "user cannot prove leaf 3 under height 1");
+        fclose(p3);
         blind_user_state_free(&st);
         blind_signer_key_free(&key);
     }

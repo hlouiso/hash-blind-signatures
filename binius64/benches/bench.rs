@@ -108,7 +108,7 @@ fn bench_single(iters: usize) -> (f64, f64, usize) {
 
     let xmss_sig = sign_all(&keys, &pk_seed, &com).remove(0);
     let root = xmss_sig.root;
-    let verifier = Verifier::with_zk_verifier(Arc::new(zk_verifier), root, pk_seed);
+    let verifier = Verifier::with_zk_verifier(Arc::new(zk_verifier), root, pk_seed, xmss_h());
 
     let sig = user.prove(&xmss_sig).expect("prove failed");
     verifier
@@ -144,7 +144,7 @@ fn bench_single(iters: usize) -> (f64, f64, usize) {
     println!("  Sizes of the main objects");
     print_size(
         "Public key of S (pk)",
-        write_signer_pub(&[root], &pk_seed).len(),
+        write_signer_pub(&[root], &pk_seed, xmss_h()).len(),
     );
     print_size(
         "Secret key of S (sk)",
@@ -171,7 +171,7 @@ fn bench_multi(n: usize, iters: usize) -> anyhow::Result<(f64, f64, usize)> {
     let (keys, pk_seed) = signer_keys(&mut rng, n);
     let sigs = sign_all(&keys, &pk_seed, &com);
     let roots: Vec<blind_xmss_binius64::Digest> = sigs.iter().map(|s| s.root).collect();
-    let verifier = MultiVerifier::with_zk_verifier(Arc::new(zk_verifier), roots, pk_seed);
+    let verifier = MultiVerifier::with_zk_verifier(Arc::new(zk_verifier), roots, pk_seed, xmss_h());
 
     let sig = user.prove(&sigs).expect("prove failed");
     verifier

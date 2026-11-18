@@ -1,7 +1,8 @@
 //! The circuit proves y = BLAKE3(r), m̂_k = Σ_i a_{k,i}r_i + b_k, and an
 //! XMSS signature on d = BLAKE3(a || b || y). The public inputs are m̂,
-//! pk_seed, and the XMSS root; the commitment opening and epoch are secret.
-//! GHASH limbs and circuit words are packed little-endian.
+//! pk_seed, the XMSS root and the epoch mask of the real height; the
+//! commitment opening and epoch are secret. GHASH limbs and circuit words are
+//! packed little-endian.
 
 use binius_circuits::blake3::blake3_fixed;
 use binius_circuits::hash_based_sig::xmss::{XmssSignatureWires, circuit_xmss_verify};
@@ -11,7 +12,7 @@ use binius_frontend::{CircuitBuilder, Wire, WitnessFiller};
 use crate::commitment::{
     COMMITMENT_BYTES, HmCommitment, N_DIGEST_WORDS, N_FE, N_FE_WORDS, N_LINES, N_NONCE,
 };
-use crate::hashes::{DIGEST_WIRES, MESSAGE_WIRES, PUBLIC_PARAM_WIRES, blake3_256};
+use crate::hashes::{DIGEST_WIRES, LOG_LIFETIME, MESSAGE_WIRES, PUBLIC_PARAM_WIRES, blake3_256};
 use crate::wots::{PK_SEED_BYTES, build_wots_domain_param};
 use crate::xmss::XmssSignature;
 
@@ -208,6 +209,22 @@ pub fn build_blind_commit_public_words(
     out
 }
 
+/// The bits of an epoch at or above the real height h. An epoch with any of
+/// them set climbs into the seed-derived siblings instead of the real tree.
+pub fn epoch_mask(height: usize) -> Word {
+    assert!(
+        (1..=LOG_LIFETIME).contains(&height),
+        "XMSS height must be in 1..={LOG_LIFETIME}, got {height}",
+    );
+    Word::from_u64(!((1u64 << height) - 1))
+}
+
+/// The path climbs all `LOG_LIFETIME` levels, so the circuit itself must keep
+/// the epoch below 2^h; `mask` is the public `epoch_mask(h)`.
+pub fn assert_epoch_below_height(b: &CircuitBuilder, epoch: Wire, mask: Wire) {
+    b.assert_zero("epoch_below_height", b.band(epoch, mask));
+}
+
 pub struct XmssVerifyGadget {
     epoch: Wire,
     signature: XmssSignatureWires,
@@ -219,9 +236,12 @@ impl XmssVerifyGadget {
         domain_param_wires: &[Wire; PUBLIC_PARAM_WIRES],
         signed_msg_wires: &[Wire; MESSAGE_WIRES],
         merkle_root_wires: &[Wire; DIGEST_WIRES],
+        epoch_mask_wire: Wire,
     ) -> Self {
         let epoch = b.add_witness();
         let signature = XmssSignatureWires::new_witness(b);
+
+        assert_epoch_below_height(b, epoch, epoch_mask_wire);
 
         circuit_xmss_verify(
             b,

@@ -11,6 +11,7 @@
 int kkw_verify(FILE *proof,
                const unsigned char m_hat[32],
                const unsigned char pk_seed[XMSS_PK_SEED_BYTES],
+               uint32_t epoch_mask,
                const uint32_t pubout[8])
 {
 
@@ -48,7 +49,7 @@ int kkw_verify(FILE *proof,
     }
 
     unsigned char h_pre[32], seed_FS[32];
-    kkw_fs_prefix(m_hat, pubout, pk_seed, nonce, h_star, h_pre);
+    kkw_fs_prefix(m_hat, pubout, pk_seed, epoch_mask, nonce, h_star, h_pre);
     if (!kkw_fs_seed(h_pre, ctr, seed_FS)) {
         fprintf(stderr, "kkw_verify: grinding check failed\n"); return -1;
     }
@@ -96,7 +97,7 @@ int kkw_verify(FILE *proof,
         if (in_C[j]) continue;
         unsigned char seeds_j[N_PARTIES][SEED_SIZE];
         expand_seed_star(seed_star_buf[j], seeds_j);
-        compute_aux_from_seeds(seeds_j, aux_arr[omp_get_thread_num()],
+        compute_aux_from_seeds(seeds_j, epoch_mask, aux_arr[omp_get_thread_num()],
                                h_out_all[j]);
         preproc_commit_instance(seeds_j, aux_arr[omp_get_thread_num()], h_j_all[j]);
     }
@@ -172,7 +173,7 @@ int kkw_verify(FILE *proof,
         int e = p_out[k];
         bool round_err = false;
 
-        verify(m_hat, pk_seed, &round_err, as[k], e, zs[k], zh_all[k]);
+        verify(m_hat, pk_seed, epoch_mask, &round_err, as[k], e, zs[k], zh_all[k]);
         if (round_err) {
 #pragma omp atomic write
             online_error = true;

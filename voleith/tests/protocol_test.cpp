@@ -41,6 +41,11 @@ int main() try {
   auto malformed = encode(pk);
   malformed.push_back(0);
   rejects([&] { decode_public(malformed); }, "trailing public key byte");
+  for (uint8_t height : {0, 33}) {
+    malformed = encode(pk);
+    malformed[40] = height;
+    rejects([&] { decode_public(malformed); }, "public key height out of range");
+  }
   malformed = encode(signer.secret_key());
   malformed[56] = 0;
   rejects([&] { decode_secret(malformed); }, "height zero");
@@ -53,7 +58,7 @@ int main() try {
   malformed.pop_back();
   rejects([&] { decode_response(malformed); }, "truncated response");
 
-  Statement stmt{state.digest, pk.seed, pk.root};
+  Statement stmt{state.digest, pk.seed, pk.root, pk.height};
   auto primary = primary_witness(state, pk, response);
   auto bad_native = [&](Bytes bad) {
     rejects(
@@ -106,6 +111,9 @@ int main() try {
   wrong_pk = pk;
   wrong_pk.seed[0] ^= 1;
   require(!verify_signature(wrong_pk, message, proof), "public seed binding");
+  wrong_pk = pk;
+  wrong_pk.height = 1;
+  require(!verify_signature(wrong_pk, message, proof), "height binding");
   auto l = proof_layout();
   for (size_t offset : {size_t(0), size_t(8), size_t(9), size_t(10), l.nonce,
                         l.commitment, l.vole_check, l.correction, l.quicksilver,
@@ -141,6 +149,27 @@ int main() try {
           "failed reservation reused leaf");
   auto last = signer.sign(state.commitment);
   require(last.leaf_index == 3, "last leaf");
+  {
+    // Leaf 3 reaches the same root under heights 2 and 1; only the range check
+    // on the leaf index tells them apart.
+    auto top = primary_witness(state, pk, last);
+    NativeContext e(top);
+    Circuit c(e);
+    c.statement(stmt);
+    auto low_pk = pk;
+    low_pk.height = 1;
+    rejects([&] { primary_witness(state, low_pk, last); },
+            "native verifier accepted leaf 3 at height 1");
+    auto low = stmt;
+    low.height = 1;
+    rejects(
+        [&] {
+          NativeContext e(top);
+          Circuit c(e);
+          c.statement(low);
+        },
+        "circuit accepted leaf 3 at height 1");
+  }
   bool exhausted = false;
   try {
     signer.sign(state.commitment);

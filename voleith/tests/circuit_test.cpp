@@ -80,9 +80,10 @@ int main() try {
   auto tree = xmss_keypair_new(sk, s.pk_seed.data(), 2);
   require(tree, "XMSS keygen");
   xmss_keypair_root(tree, s.root.data());
+  s.height = 2;
   xmss_sig sig{};
   require(xmss_keypair_sign(tree, 1, d, 32, &sig), "XMSS sign");
-  require(xmss_verify(s.pk_seed.data(), s.root.data(), d, 32, &sig),
+  require(xmss_verify(s.pk_seed.data(), s.root.data(), s.height, d, 32, &sig),
           "XMSS verify");
   auto p = primary_for(r, a, com, s.pk_seed.data(), sig);
   NativeContext e(p);

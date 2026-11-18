@@ -50,6 +50,7 @@ int kkw_verbose = 1;
 int kkw_prove(const unsigned char *input,
               const unsigned char m_hat[32],
               const unsigned char pk_seed[XMSS_PK_SEED_BYTES],
+              uint32_t epoch_mask,
               const uint32_t pubout[8],
               FILE *out)
 {
@@ -116,7 +117,7 @@ int kkw_prove(const unsigned char *input,
         {
             a a_j;
             uint32_t zh[8];
-            building_views(&a_j, m_hat, pk_seed, dbufs[t], lam_j, tapes_j,
+            building_views(&a_j, m_hat, pk_seed, epoch_mask, dbufs[t], lam_j, tapes_j,
                            auxbufs[t], sbufs[t], r_all[j], zh);
 
             for (int w = 0; w < 8; w++) {
@@ -172,7 +173,7 @@ int kkw_prove(const unsigned char *input,
     }
 
     unsigned char h_pre[32], seed_FS[32];
-    kkw_fs_prefix(m_hat, pubout, pk_seed, nonce, h_star, h_pre);
+    kkw_fs_prefix(m_hat, pubout, pk_seed, epoch_mask, nonce, h_star, h_pre);
     uint32_t ctr = 0;
     while (!kkw_fs_seed(h_pre, ctr, seed_FS))
         ctr++;
@@ -219,7 +220,7 @@ int kkw_prove(const unsigned char *input,
                                  xbufs[t], tbufs[t], dbufs[t]);
 
             uint32_t zh[8];
-            building_views(as[k], m_hat, pk_seed, dbufs[t], lam_j, tapes_j,
+            building_views(as[k], m_hat, pk_seed, epoch_mask, dbufs[t], lam_j, tapes_j,
                            zs[k]->aux, sbufs[t], r_all[j], zh);
 
             compute_msgs_e(e, sbufs[t], zs[k]->msgs_e);

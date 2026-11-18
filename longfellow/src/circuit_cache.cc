@@ -29,7 +29,7 @@ constexpr int kZstdLevel = 16;
 
 constexpr char kMagic[4] = {'B', 'L', 'F', 'C'};
 
-constexpr uint8_t kFormatVersion = 7;
+constexpr uint8_t kFormatVersion = 8;
 constexpr size_t kHeaderLen = sizeof(kMagic) + 1;
 
 }

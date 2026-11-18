@@ -6,6 +6,7 @@
 namespace voleith {
 struct PublicKey {
   std::array<uint8_t, 16> seed, root;
+  uint8_t height;
 };
 
 struct UserState {

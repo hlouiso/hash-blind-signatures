@@ -11,6 +11,7 @@ extern int kkw_verbose;
 int kkw_prove(const unsigned char *input  ,
               const unsigned char m_hat[32],
               const unsigned char pk_seed[XMSS_PK_SEED_BYTES],
+              uint32_t epoch_mask,
               const uint32_t pubout[8],
               FILE *out);
 

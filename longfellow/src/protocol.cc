@@ -147,18 +147,20 @@ BlindSignature user_prove(const Field& F,
 }
 
 bool verify_blind_sig(const Field& F, const proofs::Circuit<Field>& circuit,
-                      const Node& xmss_root, const PkSeed& pk_seed,
-                      const BlindSignature& sig, const Bytes& msg) {
+                      const SignerPub& pub, const BlindSignature& sig,
+                      const Bytes& msg) {
+  if (pub.height < 1 || pub.height > kXmssH) return false;
 
   auto nw = std::make_unique<NativeWitness>();
   const Hash m_hat = sha256(msg);
   std::memcpy(nw->m_hat, m_hat.data(), kHashBytes);
-  const Bytes dp = build_wots_domain_param(pk_seed);
+  const Bytes dp = build_wots_domain_param(pub.pk_seed);
   std::memcpy(nw->domain_param, dp.data(), kDomainParamLen);
-  nw->xmss_root = xmss_root;
+  nw->xmss_root = pub.root;
+  nw->leaf_mask = leaf_index_mask(pub.height);
 
-  auto pub = make_public_inputs(F, circuit, *nw);
-  return blind_verify(F, circuit, *pub, sig.proof);
+  auto inputs = make_public_inputs(F, circuit, *nw);
+  return blind_verify(F, circuit, *inputs, sig.proof);
 }
 
 std::vector<uint8_t> write_signer_key(const SignerKey& key) {
@@ -190,18 +192,23 @@ SignerKey read_signer_key(const std::vector<uint8_t>& buf) {
   return key;
 }
 
-std::vector<uint8_t> write_signer_pub(const Node& xmss_root, const PkSeed& pk_seed) {
+std::vector<uint8_t> write_signer_pub(const SignerPub& pub) {
   std::vector<uint8_t> out;
-  out.reserve(kNodeBytes + kPkSeedBytes);
-  push_node(out, xmss_root);
-  push_pk_seed(out, pk_seed);
+  out.reserve(kNodeBytes + kPkSeedBytes + 1);
+  push_node(out, pub.root);
+  push_pk_seed(out, pub.pk_seed);
+  out.push_back(pub.height);
   return out;
 }
 
-std::pair<Node, PkSeed> read_signer_pub(const std::vector<uint8_t>& buf) {
-  proofs::check(buf.size() == kNodeBytes + kPkSeedBytes,
+SignerPub read_signer_pub(const std::vector<uint8_t>& buf) {
+  proofs::check(buf.size() == kNodeBytes + kPkSeedBytes + 1,
                 "read_signer_pub: wrong size");
-  return {read_node(buf.data()), read_pk_seed(buf.data() + kNodeBytes)};
+  SignerPub pub{read_node(buf.data()), read_pk_seed(buf.data() + kNodeBytes),
+                buf[kNodeBytes + kPkSeedBytes]};
+  proofs::check(pub.height >= 1 && pub.height <= kXmssH,
+                "read_signer_pub: height out of range");
+  return pub;
 }
 
 std::vector<uint8_t> write_commitment(const HmCommitment& com) {
@@ -264,7 +271,7 @@ std::vector<uint8_t> write_xmss_sig(const XmssSignature& sig) {
 }
 
 std::optional<XmssSignature> read_xmss_sig(const std::vector<uint8_t>& buf,
-                                           const PkSeed& pk_seed,
+                                           const PkSeed& pk_seed, size_t height,
                                            const uint8_t* message,
                                            size_t message_len) {
   if (buf.size() != kXmssSigBytes) return std::nullopt;
@@ -277,8 +284,8 @@ std::optional<XmssSignature> read_xmss_sig(const std::vector<uint8_t>& buf,
   AuthPath auth_path;
   for (size_t h = 0; h < kXmssH; ++h) { auth_path[h] = read_node(p); p += kNodeBytes; }
 
-  return xmss_expand(xmss_wots_spec(), pk_seed, leaf_index, nonce, sig_hashes,
-                     auth_path, message, message_len);
+  return xmss_expand(xmss_wots_spec(), pk_seed, height, leaf_index, nonce,
+                     sig_hashes, auth_path, message, message_len);
 }
 
 std::vector<uint8_t> write_blind_sig(const BlindSignature& sig) {

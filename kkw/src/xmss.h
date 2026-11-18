@@ -130,8 +130,16 @@ void xmss_compute_root(const uint8_t sk_seed[32], const uint8_t pk_seed[XMSS_PK_
 int xmss_sign(const uint8_t sk_seed[32], const uint8_t pk_seed[XMSS_PK_SEED_BYTES], int height,
               uint32_t leaf_index, const uint8_t *message, size_t message_len, xmss_sig *out);
 
-int xmss_verify(const uint8_t pk_seed[XMSS_PK_SEED_BYTES], const xmss_node root, const uint8_t *message,
-                size_t message_len, const xmss_sig *sig);
+/* The bits of a leaf index at or above the real height h. An index with any of
+ * them set climbs into the seed-derived siblings instead of the real tree, so
+ * the verifier and the circuit reject it. */
+static inline uint32_t xmss_leaf_index_mask(int height)
+{
+    return (uint32_t)~((UINT64_C(1) << height) - 1);
+}
+
+int xmss_verify(const uint8_t pk_seed[XMSS_PK_SEED_BYTES], const xmss_node root, int height,
+                const uint8_t *message, size_t message_len, const xmss_sig *sig);
 
 void xmss_write_sig(const xmss_sig *sig, uint8_t out[XMSS_SIG_BYTES]);
 

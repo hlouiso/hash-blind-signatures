@@ -23,7 +23,7 @@ fn blind_signature_roundtrip() {
 
     let mut blind_sig = user.prove(&signature).expect("proof generation failed");
 
-    let verifier = Verifier::new(signer.public_key(), signer.pk_seed());
+    let verifier = Verifier::new(signer.public_key(), signer.pk_seed(), TEST_H);
     verifier
         .verify(&blind_sig, &message)
         .expect("Blind signature verification failed");
@@ -37,7 +37,7 @@ fn blind_signature_roundtrip() {
         blind_sig.proof.truncate(original_len);
     }
 
-    let previous_label = b"blind-xmss-binius64-v8-salted-ghash";
+    let previous_label = b"blind-xmss-binius64-v9-salted-ghash";
     blind_sig.proof[..previous_label.len()].copy_from_slice(previous_label);
     assert!(matches!(
         verifier.verify(&blind_sig, &message),
@@ -82,10 +82,49 @@ fn native_and_circuit_xmss_agree() {
     );
 
     let blind_sig = user.prove(&xmss_sig).expect("prove failed");
-    let verifier = Verifier::new(signer.public_key(), signer.pk_seed());
+    let verifier = Verifier::new(signer.public_key(), signer.pk_seed(), TEST_H);
     verifier
         .verify(&blind_sig, &message)
         .expect("ZK verifier must accept a valid blind signature");
+
+    Verifier::new(signer.public_key(), signer.pk_seed(), TEST_H - 1)
+        .verify(&blind_sig, &message)
+        .expect_err("ZK verifier must bind the signer's height");
+}
+
+#[test]
+fn epoch_above_the_real_tree_has_no_proof() {
+    // Epoch 2^(h-1) climbs to the same root whatever height is claimed, so
+    // under h-1 only the circuit's range check on the epoch stops it.
+    let mut rng = rand::rng();
+    let message = b"top half of the tree".to_vec();
+
+    let mut user = User::new(&mut rng);
+    let com = user.commit(&message);
+
+    let fresh = Signer::new(&mut rng, TEST_H);
+    let mut signer = Signer::from_key(
+        &fresh.sk_seed(),
+        &fresh.pk_seed(),
+        1 << (TEST_H - 1),
+        TEST_H,
+    );
+    let mut xmss_sig = signer.sign(&com).expect("sign failed");
+
+    let blind_sig = user.prove(&xmss_sig).expect("prove failed");
+    Verifier::new(signer.public_key(), signer.pk_seed(), TEST_H)
+        .verify(&blind_sig, &message)
+        .expect("epoch 2^(h-1) is a leaf of a height-h tree");
+
+    xmss_sig.height = TEST_H - 1;
+    let err = user
+        .prove(&xmss_sig)
+        .err()
+        .expect("the circuit must reject an epoch at or above 2^h");
+    assert!(
+        format!("{err:?}").contains("epoch_below_height"),
+        "rejected by the range check, not elsewhere: {err:?}"
+    );
 }
 
 #[test]
@@ -139,7 +178,7 @@ fn wrong_xmss_root_rejected() {
         "native verifier must reject a signature under the wrong root"
     );
 
-    let bad_verifier = Verifier::new(wrong_root, signer.pk_seed());
+    let bad_verifier = Verifier::new(wrong_root, signer.pk_seed(), TEST_H);
     bad_verifier
         .verify(&blind_sig, &message)
         .expect_err("ZK verifier with wrong root must reject a valid proof");

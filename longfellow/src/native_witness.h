@@ -1,5 +1,6 @@
-/* Native counterpart of StatementWires. m_hat, domain_param and xmss_root are
- * public; all commitment, WOTS+, and authentication-path fields are secret. */
+/* Native counterpart of StatementWires. m_hat, domain_param, xmss_root and
+ * leaf_mask are public; all commitment, WOTS+, and authentication-path fields
+ * are secret. */
 
 #ifndef BLIND_LONGFELLOW_NATIVE_WITNESS_H_
 #define BLIND_LONGFELLOW_NATIVE_WITNESS_H_
@@ -27,6 +28,7 @@ struct NativeWitness {
   uint8_t m_hat[kHashBytes];
   uint8_t domain_param[kDomainParamLen];
   Node    xmss_root;
+  uint32_t leaf_mask;
 
   std::array<std::array<uint8_t, kFeBytes>, kNNonce> r_bytes;
   std::array<std::array<std::array<uint8_t, kFeBytes>, kNNonce>, kNLines> a_bytes;

@@ -55,6 +55,7 @@ auto challenge1(const Statement& s, const uint8_t* nonce, const uint8_t* check,
   h.update(s.message);
   h.update(s.pk_seed);
   h.update(s.root);
+  h.update_byte(s.height);
   h.update(nonce, 32);
   h.update(check, CP::VOLE_COMMIT_CHECK_SIZE);
   h.update(commitment, CP::VOLE_COMMIT_SIZE);

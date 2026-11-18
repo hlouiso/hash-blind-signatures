@@ -130,6 +130,13 @@ pub struct XmssSignature {
 
     pub merkle_path: [Digest; LOG_LIFETIME],
     pub root: Digest,
+    /// The real height h from the public key; `epoch < 2^h`.
+    pub height: usize,
+}
+
+/// Whether `epoch` addresses a leaf of the real tree of height `height`.
+pub fn epoch_in_tree(epoch: u32, height: usize) -> bool {
+    (1..=LOG_LIFETIME).contains(&height) && u64::from(epoch) >> height == 0
 }
 
 impl XmssSignature {
@@ -154,6 +161,9 @@ impl XmssSignature {
 }
 
 pub fn xmss_verify(root: &Digest, message: &Message, sig: &XmssSignature) -> bool {
+    if !epoch_in_tree(sig.epoch, sig.height) {
+        return false;
+    }
     let public_key = XmssPublicKey {
         merkle_root: *root,
         public_param: sig.public_param,
@@ -183,12 +193,16 @@ pub fn climb(
 
 pub fn xmss_expand(
     pk_seed: &[u8; PK_SEED_BYTES],
+    height: usize,
     epoch: u32,
     randomness: &crate::hashes::Randomness,
     chain_tips: [Digest; LEN],
     merkle_path: [Digest; LOG_LIFETIME],
     message: &Message,
 ) -> Option<XmssSignature> {
+    if !epoch_in_tree(epoch, height) {
+        return None;
+    }
     let param = build_wots_domain_param(pk_seed);
     let encoding = wots_encode(message, epoch, &param, randomness)?;
     let chain_ends = compute_wots_chain_ends(&param, epoch, &chain_tips, &encoding);
@@ -202,6 +216,7 @@ pub fn xmss_expand(
         chain_tips,
         merkle_path,
         root,
+        height,
     })
 }
 
@@ -312,6 +327,7 @@ impl XmssKeyPair {
             chain_tips,
             merkle_path,
             root: self.root,
+            height: self.height,
         };
         debug_assert!(
             xmss_verify(&self.root, message, &sig),
@@ -577,6 +593,7 @@ mod tests {
 
         let got = xmss_expand(
             &kp.pk_seed,
+            TEST_H,
             sig.epoch,
             &sig.randomness,
             sig.chain_tips,
@@ -590,6 +607,7 @@ mod tests {
         assert!(
             xmss_expand(
                 &kp.pk_seed,
+                TEST_H,
                 sig.epoch,
                 &sig.randomness,
                 sig.chain_tips,
@@ -598,5 +616,32 @@ mod tests {
             )
             .is_none()
         );
+    }
+
+    #[test]
+    fn an_epoch_above_the_real_tree_is_rejected() {
+        // Epoch 2^(h-1) climbs to the same root whatever height is claimed, so
+        // only the range check tells heights h and h-1 apart.
+        let (mut kp, mut rng) = keypair(33);
+        let msg = message(0x77);
+        kp.set_next_leaf(1 << (TEST_H - 1));
+        let mut sig = kp.sign(&mut rng, &msg).expect("sign failed");
+        assert!(xmss_verify(&kp.root, &msg, &sig));
+        assert!(
+            xmss_expand(
+                &kp.pk_seed,
+                TEST_H - 1,
+                sig.epoch,
+                &sig.randomness,
+                sig.chain_tips,
+                sig.merkle_path,
+                &msg,
+            )
+            .is_none()
+        );
+        sig.height = TEST_H - 1;
+        assert!(!xmss_verify(&kp.root, &msg, &sig));
+        assert!(!epoch_in_tree(0, 0) && !epoch_in_tree(0, LOG_LIFETIME + 1));
+        assert!(epoch_in_tree(u32::MAX, LOG_LIFETIME));
     }
 }

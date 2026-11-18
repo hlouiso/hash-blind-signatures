@@ -82,7 +82,7 @@ static void run_instance(const unsigned char seed_star[SEED_SIZE],
     for (int p = 0; p < N_PARTIES; p++)
         for (int b = 0; b < INPUT_LEN; b++)
             d_out[b] ^= lam_out[p][b];
-    building_views(a_out, m_hat, pk_seed, d_out, lam_out, tapes_out,
+    building_views(a_out, m_hat, pk_seed, xmss_leaf_index_mask(XMSS_TEST_H), d_out, lam_out, tapes_out,
                    aux_out, s_all_out, r_j, zh_out);
 }
 
@@ -141,7 +141,7 @@ static void test_single_round(void)
 
         bool err = false;
         uint32_t zh_check[8];
-        verify(m_hat, pk_seed, &err, &A, e, &Z, zh_check);
+        verify(m_hat, pk_seed, xmss_leaf_index_mask(XMSS_TEST_H), &err, &A, e, &Z, zh_check);
         char msg[64];
         snprintf(msg, sizeof msg, "verify accepts honest proof (e=%d)", e);
         CHECK(!err, msg);
@@ -185,8 +185,8 @@ static void test_preproc_smoke(void)
     uint32_t *aux1 = malloc(ySize * sizeof(uint32_t));
     uint32_t *aux2 = malloc(ySize * sizeof(uint32_t));
     unsigned char h_out1[32], h_out2[32];
-    compute_aux_from_seeds(seeds, aux1, h_out1);
-    compute_aux_from_seeds(seeds, aux2, h_out2);
+    compute_aux_from_seeds(seeds, xmss_leaf_index_mask(XMSS_TEST_H), aux1, h_out1);
+    compute_aux_from_seeds(seeds, xmss_leaf_index_mask(XMSS_TEST_H), aux2, h_out2);
     CHECK(memcmp(aux1, aux2, ySize * sizeof(uint32_t)) == 0 &&
           memcmp(h_out1, h_out2, 32) == 0,
           "compute_aux_from_seeds: deterministic (aux + h_out)");
@@ -211,7 +211,7 @@ static void test_preproc_smoke(void)
         uint32_t *aux_ref = malloc(ySize * sizeof(uint32_t));
         a ref_a;
         uint32_t zh[8];
-        building_views(&ref_a, m_hat, pk_seed, d_pub, lam, tp, aux_ref, NULL,
+        building_views(&ref_a, m_hat, pk_seed, xmss_leaf_index_mask(XMSS_TEST_H), d_pub, lam, tp, aux_ref, NULL,
                        NULL, zh);
         CHECK(memcmp(aux1, aux_ref, ySize * sizeof(uint32_t)) == 0,
               "compute_aux_from_seeds == aux of a real-witness run");
@@ -235,7 +235,7 @@ static void test_preproc_smoke(void)
     unsigned char seeds3[N_PARTIES][SEED_SIZE];
     expand_seed_star(seed_star2, seeds3);
     uint32_t *aux3 = malloc(ySize * sizeof(uint32_t));
-    compute_aux_from_seeds(seeds3, aux3, NULL);
+    compute_aux_from_seeds(seeds3, xmss_leaf_index_mask(XMSS_TEST_H), aux3, NULL);
     unsigned char h3[32];
     preproc_commit_instance(seeds3, aux3, h3);
     CHECK(memcmp(h1, h3, 32) != 0, "preproc_commit_instance: distinct for different seeds");
@@ -247,7 +247,8 @@ static void test_preproc_smoke(void)
     test_random_bytes(pk_seed_fs, XMSS_PK_SEED_BYTES);
     test_random_bytes(nonce_fs, 32);
     unsigned char h_pre[32], seed_FS[32];
-    kkw_fs_prefix(m_hat, pubout, pk_seed_fs, nonce_fs, h_star, h_pre);
+    kkw_fs_prefix(m_hat, pubout, pk_seed_fs, xmss_leaf_index_mask(XMSS_TEST_H), nonce_fs, h_star,
+                  h_pre);
 
     uint32_t ctr = 0;
     while (!kkw_fs_seed(h_pre, ctr, seed_FS)) ctr++;
@@ -303,7 +304,7 @@ static void test_tamper(void)
     d_pub[W_SIG_OFF] ^= 0x01;
     a A2;
     uint32_t zh2[8];
-    building_views(&A2, m_hat, pk_seed, d_pub, lam, tapes, aux, NULL, NULL, zh2);
+    building_views(&A2, m_hat, pk_seed, xmss_leaf_index_mask(XMSS_TEST_H), d_pub, lam, tapes, aux, NULL, NULL, zh2);
 
     int still_root = 1;
     for (int w = 0; w < YP_ROOT_WORDS; w++) {
@@ -318,7 +319,7 @@ static void test_tamper(void)
     d_pub[W_SIG_OFF] ^= 0x01;
     const unsigned char first = input[W_SCHEDULE_OFF];
     d_pub[W_SCHEDULE_OFF] ^= first ^ (unsigned char)((first + 1) % XMSS_WOTS_LEN);
-    building_views(&A2, m_hat, pk_seed, d_pub, lam, tapes, aux, NULL, NULL, zh2);
+    building_views(&A2, m_hat, pk_seed, xmss_leaf_index_mask(XMSS_TEST_H), d_pub, lam, tapes, aux, NULL, NULL, zh2);
     uint32_t pool_bad = zh2[YP_POOL_WORD];
     for (int p = 0; p < N_PARTIES; p++) pool_bad ^= A2.yp[p][YP_POOL_WORD];
     CHECK(pool_bad != 0, "wrong chain counts set the public pool-failure output");

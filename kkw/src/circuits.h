@@ -32,7 +32,11 @@ _Static_assert(W_END == 1599, "witness layout changed: recheck the circuit gate 
 #define YP_LEFTOVER_WORD (YP_SUM_WORD + 1)
 /* Must be zero: schedule indices are valid and every chain ends at position 7. */
 #define YP_POOL_WORD (YP_LEFTOVER_WORD + 1)
-_Static_assert(YP_POOL_WORD < 8, "public output no longer fits in eight words");
+/* Must be zero: the leaf index under the public epoch mask, which holds its bits
+ * at or above the real height h; a larger index would climb into the
+ * seed-derived siblings rather than the real tree. */
+#define YP_EPOCH_WORD (YP_POOL_WORD + 1)
+_Static_assert(YP_EPOCH_WORD < 8, "public output no longer fits in eight words");
 
 extern int g_circuit_gates;
 
@@ -43,6 +47,7 @@ int kkw_build_schedule(unsigned char input[W_END], const unsigned char m_hat[32]
 
 void building_views(a *a, const unsigned char message_digest[32],
                     const unsigned char pk_seed[XMSS_PK_SEED_BYTES],
+                    uint32_t epoch_mask,
                     const unsigned char *d_pub,
                     unsigned char *lam[N_PARTIES],
                     unsigned char *tapes[N_PARTIES],
@@ -51,6 +56,7 @@ void building_views(a *a, const unsigned char message_digest[32],
 
 void verify(const unsigned char message_digest[32],
             const unsigned char pk_seed[XMSS_PK_SEED_BYTES],
+            uint32_t epoch_mask,
             bool *error, a *a, int e, z *z, uint32_t zh_out[8]);
 
 #endif

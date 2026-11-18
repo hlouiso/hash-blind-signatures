@@ -111,7 +111,7 @@ int cmd_keygen(const Options& opt) {
   const Node root = kp.public_key();
 
   const auto key_bytes = write_signer_key(key);
-  const auto pub_bytes = write_signer_pub(root, key.pk_seed);
+  const auto pub_bytes = write_signer_pub({root, key.pk_seed, key.height});
   write_file(opt.path("signer_key.bin"), key_bytes);
   write_file(opt.path("signer_pub.bin"), pub_bytes);
 
@@ -185,12 +185,12 @@ int cmd_prove(const Options& opt) {
   auto circuit = open_circuit(F, opt);
 
   const UserState state = read_user_state(read_file(opt.path("user_state.bin")));
-  const auto [xmss_root, pk_seed] =
-      read_signer_pub(read_file(opt.path("signer_pub.bin")));
+  const SignerPub pub = read_signer_pub(read_file(opt.path("signer_pub.bin")));
 
   const Hash d = hm_com_digest(state.com);
   const auto parsed = read_xmss_sig(read_file(opt.path("xmss_sig.bin")),
-                                    pk_seed, d.data(), d.size());
+                                    pub.pk_seed, pub.height, d.data(),
+                                    d.size());
   if (!parsed.has_value()) {
     std::fprintf(stderr,
                  "prove: xmss_sig.bin is not a signature on this commitment "
@@ -198,7 +198,7 @@ int cmd_prove(const Options& opt) {
     return 1;
   }
 
-  if (parsed->root != xmss_root) {
+  if (parsed->root != pub.root) {
     std::fprintf(stderr,
                  "prove: signature does not verify under signer_pub.bin "
                  "(recomputed root differs)\n");
@@ -229,11 +229,10 @@ int cmd_verify(const Options& opt) {
 
   const Bytes msg = read_file(opt.msg_file);
   const BlindSignature bsig = read_blind_sig(read_file(opt.path("blind_sig.bin")));
-  const auto [xmss_root, pk_seed] =
-      read_signer_pub(read_file(opt.path("signer_pub.bin")));
+  const SignerPub pub = read_signer_pub(read_file(opt.path("signer_pub.bin")));
 
   const auto t0 = Clock::now();
-  const bool ok = verify_blind_sig(F, *circuit, xmss_root, pk_seed, bsig, msg);
+  const bool ok = verify_blind_sig(F, *circuit, pub, bsig, msg);
   const double verify_ms = ms_since(t0);
 
   std::printf("  [%s]  %.1f KiB  %.0f ms\n", ok ? "PASS" : "FAIL",

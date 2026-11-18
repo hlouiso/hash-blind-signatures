@@ -85,6 +85,7 @@ static void fill_public(DenseFiller<Field>& fill, const Field& F,
       Bytes(nw.domain_param, nw.domain_param + kDomainParamLen));
   for (size_t k = 0; k < 8; ++k)
     fill.push_back(static_cast<uint64_t>(mid[k]), 32, F);
+  fill.push_back(static_cast<uint64_t>(nw.leaf_mask), 32, F);
 }
 
 static void fill_all(DenseFiller<Field>& fill, const Field& F,
@@ -151,6 +152,7 @@ std::unique_ptr<proofs::Circuit<Field>> build_circuit(
   W.xmss.xmss_root = lc.template vinput<kNodeBits>();
   for (size_t k = 0; k < 8; ++k)
     W.shared.merkle_midstate[k] = lc.template vinput<32>();
+  W.shared.leaf_mask = lc.template vinput<32>();
 
   Q.private_input();
 

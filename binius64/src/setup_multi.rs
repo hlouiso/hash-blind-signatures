@@ -1,5 +1,6 @@
-//! Multi-signer setup with public inputs m_hat || pk_seed || roots. The
-//! commitment and the single epoch shared by all XMSS signatures are secret.
+//! Multi-signer setup with public inputs m_hat || pk_seed || roots || epoch
+//! mask. The commitment and the single epoch shared by all XMSS signatures are
+//! secret; the signers share one real height and hence one mask.
 
 use binius_core::constraint_system::ConstraintSystem;
 use binius_frontend::{CircuitBuilder, Wire};
@@ -10,7 +11,7 @@ use crate::hashes::DIGEST_WIRES;
 use crate::setup::{BlindZkProver, BlindZkVerifier, LOG_INV_RATE, build_verifier_rate};
 
 pub const fn n_inout_multi(n_signers: usize) -> usize {
-    BLIND_COMMIT_INOUTS + DIGEST_WIRES * n_signers
+    BLIND_COMMIT_INOUTS + DIGEST_WIRES * n_signers + 1
 }
 
 pub struct ProverSetupMulti {
@@ -81,9 +82,16 @@ fn build_circuit_multi(
     let roots: Vec<[Wire; DIGEST_WIRES]> = (0..n_signers)
         .map(|_| std::array::from_fn(|_| b.add_inout()))
         .collect();
+    let epoch_mask_wire = b.add_inout();
 
-    let xmss_multi =
-        XmssMultisigVerifyGadget::new(&b, &commit.domain_param, commit.com_d(), epoch_wire, &roots);
+    let xmss_multi = XmssMultisigVerifyGadget::new(
+        &b,
+        &commit.domain_param,
+        commit.com_d(),
+        epoch_wire,
+        epoch_mask_wire,
+        &roots,
+    );
 
     let prefix = commit.inout_wires();
     let mut inout_wires: Vec<Wire> = Vec::with_capacity(n_inout_multi(n_signers));
@@ -91,6 +99,7 @@ fn build_circuit_multi(
     for root in &roots {
         inout_wires.extend_from_slice(root);
     }
+    inout_wires.push(epoch_mask_wire);
     debug_assert_eq!(inout_wires.len(), n_inout_multi(n_signers));
 
     let circuit = b.build();

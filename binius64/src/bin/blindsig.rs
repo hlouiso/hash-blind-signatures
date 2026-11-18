@@ -107,7 +107,7 @@ fn cmd_keygen(opt: &Options) -> Result<()> {
         })
         .collect();
     let key_bytes = write_signer_keys(&keys, &pk_seed, opt.height);
-    let pub_bytes = write_signer_pub(&roots, &pk_seed);
+    let pub_bytes = write_signer_pub(&roots, &pk_seed, opt.height);
     write_file(&opt.path("signer_key.bin"), &key_bytes)?;
     write_file(&opt.path("signer_pub.bin"), &pub_bytes)?;
 
@@ -217,12 +217,12 @@ fn cmd_sign(opt: &Options) -> Result<()> {
 fn cmd_prove(opt: &Options) -> Result<()> {
     let state = read_user_state(&read_file(&opt.path("user_state.bin"))?)
         .context("malformed user_state.bin")?;
-    let (roots, pk_seed) = read_signer_pub(&read_file(&opt.path("signer_pub.bin"))?)
+    let (roots, pk_seed, height) = read_signer_pub(&read_file(&opt.path("signer_pub.bin"))?)
         .context("malformed signer_pub.bin")?;
 
     let d = com_digest(&state.com);
     let sig_bytes = read_file(&opt.path("xmss_sig.bin"))?;
-    let sigs = read_xmss_sigs(&sig_bytes, &pk_seed, &d)
+    let sigs = read_xmss_sigs(&sig_bytes, &pk_seed, height, &d)
         .context("xmss_sig.bin is not a signature on this commitment under signer_pub.bin")?;
 
     if sigs.len() != roots.len() {
@@ -279,7 +279,7 @@ fn cmd_prove(opt: &Options) -> Result<()> {
 
 fn cmd_verify(opt: &Options) -> Result<()> {
     let msg = opt.msg()?;
-    let (roots, pk_seed) = read_signer_pub(&read_file(&opt.path("signer_pub.bin"))?)
+    let (roots, pk_seed, height) = read_signer_pub(&read_file(&opt.path("signer_pub.bin"))?)
         .context("malformed signer_pub.bin")?;
     let proof = read_file(&opt.path("blind_sig.bin"))?;
 
@@ -293,7 +293,7 @@ fn cmd_verify(opt: &Options) -> Result<()> {
             "  circuit  : built in {:.0} ms",
             t0.elapsed().as_secs_f64() * 1e3
         );
-        let verifier = Verifier::with_zk_verifier(Arc::new(zk_verifier), roots[0], pk_seed);
+        let verifier = Verifier::with_zk_verifier(Arc::new(zk_verifier), roots[0], pk_seed, height);
         let t1 = Instant::now();
         let ok = verifier.verify(&read_blind_sig(&proof), &msg).is_ok();
         (ok, t1.elapsed().as_secs_f64())
@@ -303,7 +303,8 @@ fn cmd_verify(opt: &Options) -> Result<()> {
             "  circuit  : built in {:.0} ms",
             t0.elapsed().as_secs_f64() * 1e3
         );
-        let verifier = MultiVerifier::with_zk_verifier(Arc::new(zk_verifier), roots, pk_seed);
+        let verifier =
+            MultiVerifier::with_zk_verifier(Arc::new(zk_verifier), roots, pk_seed, height);
         let sig = blind_xmss_binius64::BlindMultiSignature {
             proof: proof.clone(),
         };

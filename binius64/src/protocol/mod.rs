@@ -13,7 +13,7 @@ pub use verifier::Verifier;
 
 pub(crate) const FS_NONCE_BYTES: usize = 32;
 
-pub(crate) const PROOF_LABEL: &[u8] = b"blind-xmss-binius64-v9-salted-ghash";
+pub(crate) const PROOF_LABEL: &[u8] = b"blind-xmss-binius64-v10-salted-ghash";
 
 pub struct BlindSignature {
     pub proof: Vec<u8>,
@@ -69,7 +69,7 @@ mod tests {
         let xmss_signature = signer_response(&mut kp, &com);
         let blind_sig = user.prove(&xmss_signature).expect("user_prove failed");
 
-        let verifier = Verifier::new(kp.root, kp.pk_seed);
+        let verifier = Verifier::new(kp.root, kp.pk_seed, kp.height());
         verifier
             .verify(&blind_sig, message)
             .expect("full blind signature must verify");

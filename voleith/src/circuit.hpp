@@ -29,6 +29,7 @@ struct Statement {
   std::array<uint8_t, 32> message;
   std::array<uint8_t, 16> pk_seed;
   std::array<uint8_t, 16> root;
+  uint8_t height;  // the signer's real XMSS height h, in [1, 32]
 };
 
 // Native and authenticated evaluation must share witness and constraint order.
@@ -360,6 +361,8 @@ class Circuit {
   }
 
   void statement(const Statement& pub) {
+    if (pub.height < 1 || pub.height > XMSS_H)
+      throw std::invalid_argument("XMSS height must be in [1,32]");
     auto r = input(0, 96), a = input(96, 192);
     auto m = constant(pub.message), seed = constant(pub.pk_seed);
     Bits b;
@@ -377,6 +380,9 @@ class Circuit {
     append(com, y);
     auto d = hash("HMd", com);
     auto epoch = input(kSigOffset, 4), nonce = input(kSigOffset + 4, 24);
+    // The path climbs all 32 levels; a leaf index at or above 2^h would climb
+    // into the seed-derived siblings rather than the real tree.
+    e.zero(e.pack(Bits(epoch.begin() + pub.height, epoch.end())));
     Bits epoch_be;
     for (size_t i = 0; i < 4; ++i)
       append(epoch_be, slice(epoch, (3 - i) * 8, 8));

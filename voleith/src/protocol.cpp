@@ -18,7 +18,7 @@ void validate_key(const SecretKey& key) {
 
 Statement statement(const PublicKey& pk,
                     const std::array<uint8_t, 32>& digest) {
-  return {digest, pk.seed, pk.root};
+  return {digest, pk.seed, pk.root, pk.height};
 }
 
 Bytes frame(char kind, size_t n) {
@@ -65,7 +65,7 @@ Signer Signer::generate(int height) {
 }
 
 PublicKey Signer::public_key() const {
-  PublicKey pk{key_.public_seed, {}};
+  PublicKey pk{key_.public_seed, {}, key_.height};
   xmss_keypair_root(tree_.get(), pk.root.data());
   return pk;
 }
@@ -112,7 +112,8 @@ Bytes primary_witness(const UserState& state, const PublicKey& pk,
             com.data(), d.data());
   if (com != state.commitment)
     throw std::invalid_argument("inconsistent HM opening");
-  if (!xmss_verify(pk.seed.data(), pk.root.data(), d.data(), d.size(), &sig))
+  if (!xmss_verify(pk.seed.data(), pk.root.data(), pk.height, d.data(),
+                   d.size(), &sig))
     throw std::invalid_argument("invalid XMSS signer response");
   Bytes p(kPrimaryBytes);
   memcpy(p.data(), state.r.data(), 96);
@@ -144,17 +145,21 @@ bool verify_signature(const PublicKey& pk, std::span<const uint8_t> message,
 }
 
 Bytes encode(const PublicKey& pk) {
-  auto b = frame('P', 32);
+  auto b = frame('P', 33);
   memcpy(b.data() + 8, pk.seed.data(), 16);
   memcpy(b.data() + 24, pk.root.data(), 16);
+  b[40] = pk.height;
   return b;
 }
 
 PublicKey decode_public(std::span<const uint8_t> b) {
-  auto p = payload(b, 'P', 32);
+  auto p = payload(b, 'P', 33);
   PublicKey pk;
   memcpy(pk.seed.data(), p, 16);
   memcpy(pk.root.data(), p + 16, 16);
+  pk.height = p[32];
+  if (pk.height < 1 || pk.height > 32)
+    throw std::invalid_argument("XMSS height must be in [1,32]");
   return pk;
 }
 

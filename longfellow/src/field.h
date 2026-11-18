@@ -23,7 +23,7 @@ constexpr size_t kPluckerSize = 3;
 constexpr size_t kLigeroRate = 7;
 constexpr size_t kLigeroNreq = 140;
 
-constexpr size_t kTranscriptVersion = 12;
+constexpr size_t kTranscriptVersion = 13;
 constexpr char kDomainTag[] = "blind-xmss-longfellow-v6-node184-nonce184-seed144";
 
 }

@@ -335,7 +335,8 @@ void test_xmss(Tally& t) {
       const Hash m = msg32((std::string("grind budget ") + std::to_string(i)).c_str());
       auto s = kp.sign(spec, rng, m.data(), m.size());
       all_ground = all_ground && s.has_value() &&
-                   xmss_verify(spec, pk_seed, kp.public_key(), s->leaf_index,
+                   xmss_verify(spec, pk_seed, kp.public_key(), kTestXmssH,
+                               s->leaf_index,
                                m.data(), m.size(), s->wots.nonce,
                                s->wots.sig_hashes, s->auth_path);
     }
@@ -344,7 +345,8 @@ void test_xmss(Tally& t) {
   }
 
   bool v1 = sig1.has_value() &&
-            xmss_verify(spec, pk_seed, kp.public_key(), sig1->leaf_index,
+            xmss_verify(spec, pk_seed, kp.public_key(), kTestXmssH,
+                        sig1->leaf_index,
                         m1.data(), m1.size(), sig1->wots.nonce,
                         sig1->wots.sig_hashes, sig1->auth_path);
   t.record("XMSS verify accepts honest signature", v1);
@@ -353,7 +355,8 @@ void test_xmss(Tally& t) {
   auto sig2 = kp.sign(spec, rng, m2.data(), m2.size());
   bool v2 = sig2.has_value() && sig2->leaf_index == 1 &&
             sig2->root == kp.public_key() &&
-            xmss_verify(spec, pk_seed, kp.public_key(), sig2->leaf_index,
+            xmss_verify(spec, pk_seed, kp.public_key(), kTestXmssH,
+                        sig2->leaf_index,
                         m2.data(), m2.size(), sig2->wots.nonce,
                         sig2->wots.sig_hashes, sig2->auth_path);
   t.record("XMSS sign+verify #2 on next leaf (same root)", v2);
@@ -365,21 +368,24 @@ void test_xmss(Tally& t) {
     auto bad = s.wots.sig_hashes;
     bad[0][0] ^= 1;
     t.record("XMSS verify rejects tampered WOTS+ signature",
-             !xmss_verify(spec, pk_seed, kp.public_key(), s.leaf_index,
+             !xmss_verify(spec, pk_seed, kp.public_key(), kTestXmssH,
+                          s.leaf_index,
                           m1.data(), m1.size(), s.wots.nonce, bad, s.auth_path));
   }
   {
     AuthPath bad = s.auth_path;
     bad[0][0] ^= 1;
     t.record("XMSS verify rejects tampered auth path",
-             !xmss_verify(spec, pk_seed, kp.public_key(), s.leaf_index,
+             !xmss_verify(spec, pk_seed, kp.public_key(), kTestXmssH,
+                          s.leaf_index,
                           m1.data(), m1.size(), s.wots.nonce,
                           s.wots.sig_hashes, bad));
   }
   {
     const Hash wrong = msg32("a different message entirely");
     t.record("XMSS verify rejects wrong message",
-             !xmss_verify(spec, pk_seed, kp.public_key(), s.leaf_index,
+             !xmss_verify(spec, pk_seed, kp.public_key(), kTestXmssH,
+                          s.leaf_index,
                           wrong.data(), wrong.size(), s.wots.nonce,
                           s.wots.sig_hashes, s.auth_path));
   }
@@ -387,15 +393,36 @@ void test_xmss(Tally& t) {
     Bytes bad_nonce = s.wots.nonce;
     bad_nonce[0] ^= 1;
     t.record("XMSS verify rejects wrong nonce",
-             !xmss_verify(spec, pk_seed, kp.public_key(), s.leaf_index,
+             !xmss_verify(spec, pk_seed, kp.public_key(), kTestXmssH,
+                          s.leaf_index,
                           m1.data(), m1.size(), bad_nonce, s.wots.sig_hashes,
                           s.auth_path));
   }
   {
     t.record("XMSS verify rejects wrong leaf index",
-             !xmss_verify(spec, pk_seed, kp.public_key(), s.leaf_index + 1,
+             !xmss_verify(spec, pk_seed, kp.public_key(), kTestXmssH,
+                          s.leaf_index + 1,
                           m1.data(), m1.size(), s.wots.nonce,
                           s.wots.sig_hashes, s.auth_path));
+  }
+  {
+    // Leaf 2^(h-1) climbs the same path to the same root under h and h-1, so
+    // only the range check can tell them apart.
+    const uint64_t resume = kp.next_leaf();
+    kp.set_next_leaf(uint64_t{1} << (kTestXmssH - 1));
+    const Hash m = msg32("top half of the tree");
+    const auto top = kp.sign(spec, rng, m.data(), m.size());
+    kp.set_next_leaf(resume);
+    const auto verifies_at = [&](size_t height) {
+      return top.has_value() &&
+             xmss_verify(spec, pk_seed, kp.public_key(), height,
+                         top->leaf_index, m.data(), m.size(), top->wots.nonce,
+                         top->wots.sig_hashes, top->auth_path);
+    };
+    t.record("XMSS verify accepts leaf 2^(h-1) at height h",
+             verifies_at(kTestXmssH));
+    t.record("XMSS verify rejects leaf 2^(h-1) at height h-1",
+             !verifies_at(kTestXmssH - 1));
   }
 
   {
@@ -464,7 +491,8 @@ void test_xmss(Tally& t) {
             idx >>= 1;
           }
           if (split_ok &&
-              !xmss_verify(spec, split_pk, split.public_key(), leaf, m.data(),
+              !xmss_verify(spec, split_pk, split.public_key(), height,
+                           leaf, m.data(),
                            m.size(), sig->wots.nonce, sig->wots.sig_hashes,
                            sig->auth_path)) {
             std::printf("    (h=%zu sub=%zu leaf %u: does not verify)\n", height,
@@ -497,7 +525,8 @@ void test_signer_end_to_end(const Field& F, Tally& t) {
 
   const bool ok =
       sig.has_value() &&
-      xmss_verify(spec, pk_seed, signer.public_key(), sig->leaf_index,
+      xmss_verify(spec, pk_seed, signer.public_key(), kTestXmssH,
+                  sig->leaf_index,
                   d.data(), d.size(), sig->wots.nonce,
                   sig->wots.sig_hashes, sig->auth_path) &&
       verify_hm_opening(F, com, user_msg, opening.r);
@@ -582,8 +611,13 @@ void test_serialization(const Field& F, Tally& t) {
     PkSeed pk_seed;
     for (size_t i = 0; i < root.size(); ++i) root[i] = i;
     for (size_t i = 0; i < pk_seed.size(); ++i) pk_seed[i] = 0xA0 + i;
-    const auto [r2, p2] = read_signer_pub(write_signer_pub(root, pk_seed));
-    t.record("signer_pub round-trips", r2 == root && p2 == pk_seed);
+    const SignerPub pub{root, pk_seed, static_cast<uint8_t>(kTestXmssH)};
+    const std::vector<uint8_t> wire = write_signer_pub(pub);
+    const SignerPub back = read_signer_pub(wire);
+    t.record("signer_pub round-trips with its height",
+             wire.size() == kNodeBytes + kPkSeedBytes + 1 &&
+                 back.root == root && back.pk_seed == pk_seed &&
+                 back.height == kTestXmssH);
   }
   {
     const Bytes msg = str_bytes("serialize me");
@@ -618,20 +652,24 @@ void test_serialization(const Field& F, Tally& t) {
       const std::vector<uint8_t> wire = write_xmss_sig(*sig);
       t.record("xmss_sig is the minimal 1212 B", wire.size() == 1212);
       const Hash d = hm_com_digest(com);
-      const auto parsed = read_xmss_sig(wire, key.pk_seed, d.data(), d.size());
+      const auto parsed = read_xmss_sig(wire, key.pk_seed, kTestXmssH,
+                                        d.data(), d.size());
       t.record("xmss_sig expands", parsed.has_value());
 
       PkSeed wrong_seed = key.pk_seed;
       wrong_seed[0] ^= 1;
       t.record("wrong pk_seed rejected",
-               !read_xmss_sig(wire, wrong_seed, d.data(), d.size()).has_value());
+               !read_xmss_sig(wire, wrong_seed, kTestXmssH,
+                              d.data(), d.size()).has_value());
       std::vector<uint8_t> truncated(wire.begin(), wire.end() - 1);
       t.record("truncated xmss_sig rejected",
-               !read_xmss_sig(truncated, key.pk_seed, d.data(), d.size())
+               !read_xmss_sig(truncated, key.pk_seed, kTestXmssH,
+                              d.data(), d.size())
                     .has_value());
       std::vector<uint8_t> tampered = wire;
       tampered[4 + kNonceLength] ^= 1;
-      const auto bad = read_xmss_sig(tampered, key.pk_seed, d.data(), d.size());
+      const auto bad = read_xmss_sig(tampered, key.pk_seed, kTestXmssH,
+                                     d.data(), d.size());
       t.record("tampered sig_hashes yields a different root",
                !bad.has_value() || bad->root != sig->root);
 
@@ -722,6 +760,7 @@ std::unique_ptr<StatementWires<EvalLogic>> fill_eval_wires(
       Bytes(nw.domain_param, nw.domain_param + kDomainParamLen));
   for (size_t k = 0; k < 8; ++k)
     W->shared.merkle_midstate[k] = L.template vbit<32>(mid[k]);
+  W->shared.leaf_mask = L.template vbit<32>(nw.leaf_mask);
 
   for (size_t i = 0; i < kNNonce; ++i)
     for (size_t j = 0; j < kFeBytes; ++j)
@@ -867,6 +906,7 @@ void test_protocol(Tally& t, const Field& F, const Circuit<Field>& circuit) {
   const XmssKeyPair kp =
       XmssKeyPair::generate_from_seed(key.sk_seed, key.pk_seed, kTestXmssH);
   const Node xmss_root = kp.public_key();
+  const SignerPub pub{xmss_root, key.pk_seed, key.height};
 
   const Bytes message = str_bytes("my secret message");
 
@@ -885,7 +925,7 @@ void test_protocol(Tally& t, const Field& F, const Circuit<Field>& circuit) {
            verify_hm_opening(F, com, state.opening.msg, state.opening.r));
 
   t.record("full blind signature verifies",
-           verify_blind_sig(F, circuit, xmss_root, key.pk_seed, bsig, message));
+           verify_blind_sig(F, circuit, pub, bsig, message));
 
   {
     proofs::ZkProof<Field> native(circuit, kLigeroRate, kLigeroNreq);
@@ -902,51 +942,52 @@ void test_protocol(Tally& t, const Field& F, const Circuit<Field>& circuit) {
                  !std::equal(bsig.proof.begin(), bsig.proof.begin() + root_bytes,
                              fresh.proof.begin()));
     t.record("fresh proof of the same statement verifies",
-             verify_blind_sig(F, circuit, xmss_root, key.pk_seed, fresh, message));
+             verify_blind_sig(F, circuit, pub, fresh, message));
   }
   {
     BlindSignature bad_root = bsig;
     bad_root.proof[0] ^= 0x01;
     t.record("tampered Ligero commitment root rejected",
-             !verify_blind_sig(F, circuit, xmss_root, key.pk_seed, bad_root,
+             !verify_blind_sig(F, circuit, pub, bad_root,
                                message));
   }
   {
     BlindSignature prefixed = bsig;
     prefixed.proof.insert(prefixed.proof.begin(), 32, 0);
     t.record("legacy 32-byte nonce prefix rejected",
-             !verify_blind_sig(F, circuit, xmss_root, key.pk_seed, prefixed,
+             !verify_blind_sig(F, circuit, pub, prefixed,
                                message));
   }
   {
     BlindSignature truncated = bsig;
     truncated.proof.pop_back();
     t.record("truncated native proof rejected",
-             !verify_blind_sig(F, circuit, xmss_root, key.pk_seed, truncated,
+             !verify_blind_sig(F, circuit, pub, truncated,
                                message));
   }
   {
     BlindSignature trailing = bsig;
     trailing.proof.push_back(0);
     t.record("trailing proof bytes rejected",
-             !verify_blind_sig(F, circuit, xmss_root, key.pk_seed, trailing,
+             !verify_blind_sig(F, circuit, pub, trailing,
                                message));
   }
   t.record("empty proof rejected",
-           !verify_blind_sig(F, circuit, xmss_root, key.pk_seed, BlindSignature{},
+           !verify_blind_sig(F, circuit, pub, BlindSignature{},
                              message));
 
   proofs::set_log_level(proofs::ERROR);
 
   t.record("wrong message rejected",
-           !verify_blind_sig(F, circuit, xmss_root, key.pk_seed, bsig,
+           !verify_blind_sig(F, circuit, pub, bsig,
                              str_bytes("a different message")));
 
   {
     Node wrong_root = xmss_root;
     wrong_root[0] ^= 0x01;
     t.record("wrong signer root rejected",
-             !verify_blind_sig(F, circuit, wrong_root, key.pk_seed, bsig,
+             !verify_blind_sig(F, circuit,
+                               {wrong_root, key.pk_seed, key.height}, bsig,
                                message));
   }
   {
@@ -954,8 +995,35 @@ void test_protocol(Tally& t, const Field& F, const Circuit<Field>& circuit) {
     PkSeed wrong_seed = key.pk_seed;
     wrong_seed[0] ^= 0x01;
     t.record("wrong signer pk_seed rejected",
-             !verify_blind_sig(F, circuit, xmss_root, wrong_seed, bsig,
-                               message));
+             !verify_blind_sig(F, circuit, {xmss_root, wrong_seed, key.height},
+                               bsig, message));
+  }
+  t.record("wrong signer height rejected",
+           !verify_blind_sig(
+               F, circuit,
+               {xmss_root, key.pk_seed, static_cast<uint8_t>(key.height - 1)},
+               bsig, message));
+
+  {
+    // Leaf 2^(h-1) reaches the root under h-1 as well; only the mask stops it.
+    SignerKey top_key = key;
+    top_key.next_leaf = uint64_t{1} << (kTestXmssH - 1);
+    const auto top_sig = signer_sign(top_key, com);
+    if (top_sig.has_value()) {
+      auto nw = NativeWitness::build_from(F, state.opening.msg, com,
+                                          state.opening, *top_sig);
+      Elt pow_x[kBits128];
+      fill_pow_x(F, pow_x);
+      t.record("leaf 2^(h-1) satisfies the circuit at height h",
+               eval_validate(F, *nw, pow_x));
+      nw->leaf_mask = leaf_index_mask(kTestXmssH - 1);
+      t.record("leaf 2^(h-1) violates the circuit at height h-1",
+               !eval_validate(F, *nw, pow_x));
+      t.record("no proof for leaf 2^(h-1) at height h-1",
+               blind_prove(F, circuit, *nw).empty());
+    } else {
+      t.record("signer_sign at leaf 2^(h-1)", false);
+    }
   }
 
   {

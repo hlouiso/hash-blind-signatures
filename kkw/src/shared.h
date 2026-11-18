@@ -200,11 +200,13 @@ void preproc_commit_instance(unsigned char seeds[N_PARTIES][SEED_SIZE],
                               const uint32_t *aux,
                               unsigned char h_j_out[32]);
 
-void compute_aux_from_seeds(unsigned char seeds[N_PARTIES][SEED_SIZE],
+/* epoch_mask is public, but the output shares of the epoch word depend on it. */
+void compute_aux_from_seeds(unsigned char seeds[N_PARTIES][SEED_SIZE], uint32_t epoch_mask,
                              uint32_t *aux_out, unsigned char *h_out32);
 
 void kkw_fs_prefix(const unsigned char msg[32], const uint32_t pubout[8],
                    const unsigned char pk_seed[XMSS_PK_SEED_BYTES],
+                   uint32_t epoch_mask,
                    const unsigned char nonce[32],
                    const unsigned char h_star[32],
                    unsigned char h_pre[32]);

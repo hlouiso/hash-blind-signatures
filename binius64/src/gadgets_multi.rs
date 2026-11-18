@@ -4,6 +4,7 @@ use binius_circuits::hash_based_sig::xmss::{XmssSignatureWires, circuit_xmss_ver
 use binius_core::word::Word;
 use binius_frontend::{CircuitBuilder, Wire, WitnessFiller};
 
+use crate::gadgets::assert_epoch_below_height;
 use crate::hashes::{DIGEST_WIRES, MESSAGE_WIRES, PUBLIC_PARAM_WIRES};
 use crate::xmss::XmssSignature;
 
@@ -18,8 +19,11 @@ impl XmssMultisigVerifyGadget {
         domain_param_wires: &[Wire; PUBLIC_PARAM_WIRES],
         signed_msg_wires: &[Wire; MESSAGE_WIRES],
         epoch_wire: Wire,
+        epoch_mask_wire: Wire,
         roots: &[[Wire; DIGEST_WIRES]],
     ) -> Self {
+        assert_epoch_below_height(b, epoch_wire, epoch_mask_wire);
+
         let per_signer = roots
             .iter()
             .enumerate()

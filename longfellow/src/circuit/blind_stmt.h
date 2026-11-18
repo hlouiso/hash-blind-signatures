@@ -88,6 +88,9 @@ struct SharedXmssWires {
   std::array<v8, kDomainParamLen> domain_param;
 
   std::array<v32, 8> merkle_midstate;
+
+  /* leaf_index_mask(h) for the signer's real height h. */
+  v32 leaf_mask;
 };
 
 template <class LC>
@@ -313,6 +316,10 @@ void assert_xmss(const LC& L, const SharedXmssWires<LC>& S,
   const StmtFlatSha<LC> sha(L);
 
   static_assert(kXmssH == 32, "the epoch is exactly the bits the tree addresses");
+
+  // The path climbs all 32 levels; an epoch at or above 2^h would climb into
+  // the seed-derived siblings rather than the real tree.
+  L.vassert0(L.vand(S.leaf_mask, epoch));
 
   v256 message_hash;
   {

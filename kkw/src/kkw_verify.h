@@ -9,6 +9,7 @@
 int kkw_verify(FILE *proof,
                const unsigned char m_hat[32],
                const unsigned char pk_seed[XMSS_PK_SEED_BYTES],
+               uint32_t epoch_mask,
                const uint32_t pubout[8]);
 
 #endif

@@ -142,6 +142,7 @@ static void mpc_gf128_mul(
 void building_views(
     a *a, const unsigned char message_digest[32],
     const unsigned char pk_seed[XMSS_PK_SEED_BYTES],
+    uint32_t epoch_mask,
     const unsigned char *d_pub,
     unsigned char *lam[N_PARTIES],
     unsigned char *tapes[N_PARTIES],
@@ -270,6 +271,7 @@ void building_views(
                       node_pub, out_lam, XMSS_NODE_BYTES, tapes, aux, s_all, &gc);
     }
 
+    mw high;
     {
         mw li;
         {
@@ -282,6 +284,8 @@ void building_views(
                         | ((uint32_t)bl[2] <<  8) | (uint32_t)bl[3];
             }
         }
+        high.h = li.h & epoch_mask;
+        for (int i = 0; i < N_PARTIES; i++) high.l[i] = li.l[i] & epoch_mask;
         for (int level = 0; level < XMSS_H; level++) {
             unsigned char sib_pub[XMSS_NODE_BYTES], sib_lam[N_PARTIES][XMSS_NODE_BYTES];
             memcpy(sib_pub, d_pub + W_PATH_OFF + level * XMSS_NODE_BYTES, XMSS_NODE_BYTES);
@@ -365,12 +369,14 @@ void building_views(
     zh_out[YP_SUM_WORD] = acc.h;
     zh_out[YP_LEFTOVER_WORD] = leftover.h;
     zh_out[YP_POOL_WORD] = pool_check.h;
+    zh_out[YP_EPOCH_WORD] = high.h;
     for (int i = 0; i < N_PARTIES; i++) {
         a->yp[i][YP_SUM_WORD] = acc.l[i];
         a->yp[i][YP_LEFTOVER_WORD] = leftover.l[i];
         a->yp[i][YP_POOL_WORD] = pool_check.l[i];
+        a->yp[i][YP_EPOCH_WORD] = high.l[i];
     }
-    for (int w = YP_POOL_WORD + 1; w < 8; w++) {
+    for (int w = YP_EPOCH_WORD + 1; w < 8; w++) {
         zh_out[w] = 0;
         for (int i = 0; i < N_PARTIES; i++) a->yp[i][w] = 0;
     }
@@ -445,6 +451,7 @@ static void mpc_gf128_mul_verify(
 void verify(
     const unsigned char message_digest[32],
     const unsigned char pk_seed[XMSS_PK_SEED_BYTES],
+    uint32_t epoch_mask,
     bool *error, a *a_struct, int e, z *z_proof, uint32_t zh_out[8])
 {
 
@@ -598,6 +605,7 @@ void verify(
                              tapes, e, msgs_e, z_proof->aux, s_slots, &gc);
     }
 
+    mwv high;
     {
         mwv li;
         {
@@ -610,6 +618,8 @@ void verify(
                         | ((uint32_t)bl[2] <<  8) | (uint32_t)bl[3];
             }
         }
+        high.h = li.h & epoch_mask;
+        for (int j = 0; j < N_PARTIES-1; j++) high.l[j] = li.l[j] & epoch_mask;
         for (int level = 0; level < XMSS_H; level++) {
             unsigned char sib_pub[XMSS_NODE_BYTES];
             unsigned char sib_lam[N_PARTIES-1][XMSS_NODE_BYTES];
@@ -691,7 +701,8 @@ void verify(
     zh_out[YP_SUM_WORD] = sum.h;
     zh_out[YP_LEFTOVER_WORD] = leftover.h;
     zh_out[YP_POOL_WORD] = pool_check.h;
-    for (int w = YP_POOL_WORD + 1; w < 8; w++) zh_out[w] = 0;
+    zh_out[YP_EPOCH_WORD] = high.h;
+    for (int w = YP_EPOCH_WORD + 1; w < 8; w++) zh_out[w] = 0;
 
     for (int j = 0; j < N_PARTIES-1; j++) {
         int o = (j < e) ? j : j + 1;
@@ -703,7 +714,8 @@ void verify(
         if (sum.l[j] != a_struct->yp[o][YP_SUM_WORD]) { *error = true; }
         if (leftover.l[j] != a_struct->yp[o][YP_LEFTOVER_WORD]) { *error = true; }
         if (pool_check.l[j] != a_struct->yp[o][YP_POOL_WORD]) { *error = true; }
-        for (int w = YP_POOL_WORD + 1; w < 8; w++)
+        if (high.l[j] != a_struct->yp[o][YP_EPOCH_WORD]) { *error = true; }
+        for (int w = YP_EPOCH_WORD + 1; w < 8; w++)
             if (a_struct->yp[o][w] != 0) { *error = true; }
     }
 

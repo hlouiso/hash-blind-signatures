@@ -1,6 +1,6 @@
 /* The proof establishes a commitment opening for m_hat and an XMSS signature
- * on its digest. pk_seed and root are authenticated external inputs; the
- * commitment and leaf index are not part of the blind signature. */
+ * on its digest. pk_seed, root and the real height are authenticated external
+ * inputs; the commitment and leaf index are not part of the blind signature. */
 
 #ifndef BLIND_LONGFELLOW_PROTOCOL_H_
 #define BLIND_LONGFELLOW_PROTOCOL_H_
@@ -42,6 +42,12 @@ struct BlindSignature {
   std::vector<uint8_t> proof;
 };
 
+struct SignerPub {
+  Node root;
+  PkSeed pk_seed;
+  uint8_t height;
+};
+
 HmCommitment user_commit(const Field& F, Rng& rng, const Bytes& msg,
                           UserState& out_state);
 
@@ -54,14 +60,14 @@ BlindSignature user_prove(const Field& F,
                            const XmssSignature& xmss_sig);
 
 bool verify_blind_sig(const Field& F, const proofs::Circuit<Field>& circuit,
-                      const Node& xmss_root, const PkSeed& pk_seed,
-                      const BlindSignature& sig, const Bytes& msg);
+                      const SignerPub& pub, const BlindSignature& sig,
+                      const Bytes& msg);
 
 std::vector<uint8_t> write_signer_key(const SignerKey& key);
 SignerKey read_signer_key(const std::vector<uint8_t>& buf);
 
-std::vector<uint8_t> write_signer_pub(const Node& xmss_root, const PkSeed& pk_seed);
-std::pair<Node, PkSeed> read_signer_pub(const std::vector<uint8_t>& buf);
+std::vector<uint8_t> write_signer_pub(const SignerPub& pub);
+SignerPub read_signer_pub(const std::vector<uint8_t>& buf);
 
 std::vector<uint8_t> write_commitment(const HmCommitment& com);
 HmCommitment read_commitment(const std::vector<uint8_t>& buf);
@@ -71,7 +77,7 @@ UserState read_user_state(const std::vector<uint8_t>& buf);
 
 std::vector<uint8_t> write_xmss_sig(const XmssSignature& sig);
 std::optional<XmssSignature> read_xmss_sig(const std::vector<uint8_t>& buf,
-                                           const PkSeed& pk_seed,
+                                           const PkSeed& pk_seed, size_t height,
                                            const uint8_t* message,
                                            size_t message_len);
 

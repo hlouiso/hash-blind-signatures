@@ -4,7 +4,7 @@ use binius_core::word::Word;
 use binius_verifier::config::StdChallenger;
 use binius_verifier::transcript::VerifierTranscript;
 
-use crate::gadgets::{build_blind_commit_public_words, bytes16_to_words};
+use crate::gadgets::{build_blind_commit_public_words, bytes16_to_words, epoch_mask};
 use crate::hashes::Digest;
 use crate::protocol::FS_NONCE_BYTES;
 use crate::salted_zk::verify_salted;
@@ -13,27 +13,31 @@ use crate::wots::PK_SEED_BYTES;
 
 use super::{BlindSigError, BlindSignature};
 
+/// Verifies under the public key (root, pk_seed, height).
 pub struct Verifier {
     pub(crate) zk_verifier: Arc<BlindZkVerifier>,
     xmss_root: Digest,
     pk_seed: [u8; PK_SEED_BYTES],
+    epoch_mask: Word,
 }
 
 impl Verifier {
-    pub fn new(xmss_root: Digest, pk_seed: [u8; PK_SEED_BYTES]) -> Self {
+    pub fn new(xmss_root: Digest, pk_seed: [u8; PK_SEED_BYTES], height: usize) -> Self {
         let zk_verifier = build_verifier_setup().expect("failed to build verifier setup");
-        Self::with_zk_verifier(Arc::new(zk_verifier), xmss_root, pk_seed)
+        Self::with_zk_verifier(Arc::new(zk_verifier), xmss_root, pk_seed, height)
     }
 
     pub fn with_zk_verifier(
         zk_verifier: Arc<BlindZkVerifier>,
         xmss_root: Digest,
         pk_seed: [u8; PK_SEED_BYTES],
+        height: usize,
     ) -> Self {
         Verifier {
             zk_verifier,
             xmss_root,
             pk_seed,
+            epoch_mask: epoch_mask(height),
         }
     }
 
@@ -80,9 +84,10 @@ impl Verifier {
         let prefix = build_blind_commit_public_words(msg, &self.pk_seed);
         let xmss_root_words = bytes16_to_words(&self.xmss_root);
 
-        let mut inouts: Vec<Word> = Vec::with_capacity(prefix.len() + xmss_root_words.len());
+        let mut inouts: Vec<Word> = Vec::with_capacity(prefix.len() + xmss_root_words.len() + 1);
         inouts.extend_from_slice(&prefix);
         inouts.extend_from_slice(&xmss_root_words);
+        inouts.push(self.epoch_mask);
 
         assert_eq!(inouts.len(), self.zk_verifier.constraint_system().n_inout);
         inouts

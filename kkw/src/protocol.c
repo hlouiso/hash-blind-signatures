@@ -118,8 +118,10 @@ int blind_signer_sign(blind_signer_key *key, const uint8_t com[HM_COM_BYTES], xm
 }
 
 int blind_user_prove(const blind_user_state *st, const uint8_t pk_seed[XMSS_PK_SEED_BYTES],
-                     const xmss_node root, const xmss_sig *sig, FILE *out)
+                     const xmss_node root, int height, const xmss_sig *sig, FILE *out)
 {
+    if (height < 1 || height > XMSS_H)
+        return -1;
     unsigned char input[W_END];
     uint8_t m_hat[32];
     uint32_t pubout[8];
@@ -138,17 +140,20 @@ int blind_user_prove(const blind_user_state *st, const uint8_t pk_seed[XMSS_PK_S
     if (!kkw_build_schedule(input, m_hat, pk_seed))
         return -1;
     build_pubout(root, pubout);
-    return kkw_prove(input, m_hat, pk_seed, pubout, out);
+    return kkw_prove(input, m_hat, pk_seed, xmss_leaf_index_mask(height), pubout, out);
 }
 
 int blind_verify_sig(FILE *proof, const uint8_t *msg, size_t msg_len,
-                     const uint8_t pk_seed[XMSS_PK_SEED_BYTES], const xmss_node root)
+                     const uint8_t pk_seed[XMSS_PK_SEED_BYTES], const xmss_node root,
+                     int height)
 {
+    if (height < 1 || height > XMSS_H)
+        return 0;
     uint8_t m_hat[32];
     uint32_t pubout[8];
     blind_msg_digest(msg, msg_len, m_hat);
     build_pubout(root, pubout);
-    return kkw_verify(proof, m_hat, pk_seed, pubout) == 0;
+    return kkw_verify(proof, m_hat, pk_seed, xmss_leaf_index_mask(height), pubout) == 0;
 }
 
 void blind_write_signer_key(const blind_signer_key *key, uint8_t out[BLIND_SIGNER_KEY_BYTES])
@@ -179,19 +184,24 @@ int blind_read_signer_key(const uint8_t *buf, size_t len, blind_signer_key *out)
 }
 
 void blind_write_signer_pub(const xmss_node root, const uint8_t pk_seed[XMSS_PK_SEED_BYTES],
-                            uint8_t out[BLIND_SIGNER_PUB_BYTES])
+                            int height, uint8_t out[BLIND_SIGNER_PUB_BYTES])
 {
     memcpy(out, root, XMSS_NODE_BYTES);
     memcpy(out + XMSS_NODE_BYTES, pk_seed, XMSS_PK_SEED_BYTES);
+    out[XMSS_NODE_BYTES + XMSS_PK_SEED_BYTES] = (uint8_t)height;
 }
 
 int blind_read_signer_pub(const uint8_t *buf, size_t len, xmss_node root_out,
-                          uint8_t pk_seed_out[XMSS_PK_SEED_BYTES])
+                          uint8_t pk_seed_out[XMSS_PK_SEED_BYTES], int *height_out)
 {
     if (len != BLIND_SIGNER_PUB_BYTES)
         return 0;
+    int height = buf[XMSS_NODE_BYTES + XMSS_PK_SEED_BYTES];
+    if (height < 1 || height > XMSS_H)
+        return 0;
     memcpy(root_out, buf, XMSS_NODE_BYTES);
     memcpy(pk_seed_out, buf + XMSS_NODE_BYTES, XMSS_PK_SEED_BYTES);
+    *height_out = height;
     return 1;
 }
 

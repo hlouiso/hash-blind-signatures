@@ -31,7 +31,7 @@ int main(void)
     if (!xmss_sign(sk_seed, pk_seed, XMSS_TEST_H, 0, d, 32, &sig)) {
         printf("FAIL: native signing failed\n"); return 1;
     }
-    if (!xmss_verify(pk_seed, root, d, 32, &sig)) {
+    if (!xmss_verify(pk_seed, root, XMSS_TEST_H, d, 32, &sig)) {
         printf("FAIL: native signature does not verify\n"); return 1;
     }
 
@@ -73,7 +73,7 @@ int main(void)
     test_random_bytes(r_j, 32);
     a A;
     uint32_t zh[8];
-    building_views(&A, m_hat, pk_seed, d_pub, lam, tapes, aux, s_all, r_j, zh);
+    building_views(&A, m_hat, pk_seed, xmss_leaf_index_mask(XMSS_TEST_H), d_pub, lam, tapes, aux, s_all, r_j, zh);
 
     unsigned char circ_root[XMSS_NODE_BYTES];
     uint32_t circ_sum;

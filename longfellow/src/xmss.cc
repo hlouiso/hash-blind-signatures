@@ -95,11 +95,13 @@ std::pair<Node, std::vector<TreeHashCall>> xmss_auth_path(
 }
 
 bool xmss_verify(const WinternitzSpec& spec, const PkSeed& pk_seed,
-                 const Node& expected_root, uint32_t leaf_index,
+                 const Node& expected_root, size_t height, uint32_t leaf_index,
                  const uint8_t* message, size_t message_len,
                  const Bytes& nonce, const std::vector<Node>& sig_hashes,
                  const AuthPath& auth_path) {
   if (sig_hashes.size() != spec.dimension()) return false;
+  if (height < 1 || height > kXmssH) return false;
+  if ((leaf_index & leaf_index_mask(height)) != 0) return false;
 
   const Bytes param = build_wots_domain_param(pk_seed);
 
@@ -122,7 +124,7 @@ bool xmss_verify(const WinternitzSpec& spec, const PkSeed& pk_seed,
 }
 
 std::optional<XmssSignature> xmss_expand(const WinternitzSpec& spec,
-                                         const PkSeed& pk_seed,
+                                         const PkSeed& pk_seed, size_t height,
                                          uint32_t leaf_index,
                                          const Bytes& nonce,
                                          const std::vector<Node>& sig_hashes,
@@ -130,6 +132,8 @@ std::optional<XmssSignature> xmss_expand(const WinternitzSpec& spec,
                                          const uint8_t* message,
                                          size_t message_len) {
   if (sig_hashes.size() != spec.dimension()) return std::nullopt;
+  if (height < 1 || height > kXmssH) return std::nullopt;
+  if ((leaf_index & leaf_index_mask(height)) != 0) return std::nullopt;
 
   const Bytes param = build_wots_domain_param(pk_seed);
 
@@ -162,6 +166,7 @@ std::optional<XmssSignature> xmss_expand(const WinternitzSpec& spec,
   sig.auth_path = auth_path;
   sig.xmss_calls = std::move(calls);
   sig.root = root;
+  sig.height = static_cast<uint8_t>(height);
   sig.leaf_index = leaf_index;
   return sig;
 }
@@ -331,6 +336,7 @@ std::optional<XmssSignature> XmssKeyPair::sign(const WinternitzSpec& spec,
   sig.auth_path = auth_path;
   sig.xmss_calls = std::move(calls);
   sig.root = root;
+  sig.height = static_cast<uint8_t>(height_);
   sig.leaf_index = leaf_index;
   return sig;
 }

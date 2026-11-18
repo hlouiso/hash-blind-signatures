@@ -59,23 +59,34 @@ pub fn read_signer_keys(buf: &[u8]) -> Option<(Vec<SignerKey>, [u8; PK_SEED_BYTE
     Some((keys, pk_seed.try_into().expect("PK_SEED_BYTES"), height))
 }
 
-pub fn write_signer_pub(roots: &[[u8; N]], pk_seed: &[u8; PK_SEED_BYTES]) -> Vec<u8> {
-    let mut out = Vec::with_capacity(roots.len() * SIGNER_PUB_BYTES + PK_SEED_BYTES);
+/// The public key: every signer's root, then the shared pk_seed and height.
+pub fn write_signer_pub(
+    roots: &[[u8; N]],
+    pk_seed: &[u8; PK_SEED_BYTES],
+    height: usize,
+) -> Vec<u8> {
+    let mut out = Vec::with_capacity(roots.len() * SIGNER_PUB_BYTES + PK_SEED_BYTES + 1);
     for root in roots {
         out.extend_from_slice(root);
     }
     out.extend_from_slice(pk_seed);
+    out.push(u8::try_from(height).expect("height fits a byte"));
     out
 }
 
-pub fn read_signer_pub(buf: &[u8]) -> Option<(Vec<[u8; N]>, [u8; PK_SEED_BYTES])> {
-    let n = signer_count(buf.len(), SIGNER_PUB_BYTES)?;
-    let (root_bytes, pk_seed) = buf.split_at(n * N);
+pub fn read_signer_pub(buf: &[u8]) -> Option<(Vec<[u8; N]>, [u8; PK_SEED_BYTES], usize)> {
+    let (height, body) = buf.split_last()?;
+    let height = usize::from(*height);
+    if !(1..=LOG_LIFETIME).contains(&height) {
+        return None;
+    }
+    let n = signer_count(body.len(), SIGNER_PUB_BYTES)?;
+    let (root_bytes, pk_seed) = body.split_at(n * N);
     let roots = root_bytes
         .chunks_exact(N)
         .map(|c| c.try_into().expect("N bytes"))
         .collect();
-    Some((roots, pk_seed.try_into().expect("PK_SEED_BYTES")))
+    Some((roots, pk_seed.try_into().expect("PK_SEED_BYTES"), height))
 }
 
 fn signer_count(len: usize, per: usize) -> Option<usize> {
@@ -156,6 +167,7 @@ pub fn write_xmss_sig(sig: &XmssSignature) -> Vec<u8> {
 pub fn read_xmss_sig(
     buf: &[u8],
     pk_seed: &[u8; PK_SEED_BYTES],
+    height: usize,
     message: &Message,
 ) -> Option<XmssSignature> {
     if buf.len() != XMSS_SIG_BYTES {
@@ -175,6 +187,7 @@ pub fn read_xmss_sig(
 
     xmss_expand(
         pk_seed,
+        height,
         epoch,
         &randomness,
         chain_tips,
@@ -194,13 +207,14 @@ pub fn write_xmss_sigs(sigs: &[XmssSignature]) -> Vec<u8> {
 pub fn read_xmss_sigs(
     buf: &[u8],
     pk_seed: &[u8; PK_SEED_BYTES],
+    height: usize,
     message: &Message,
 ) -> Option<Vec<XmssSignature>> {
     if buf.is_empty() || buf.len() % XMSS_SIG_BYTES != 0 {
         return None;
     }
     buf.chunks_exact(XMSS_SIG_BYTES)
-        .map(|c| read_xmss_sig(c, pk_seed, message))
+        .map(|c| read_xmss_sig(c, pk_seed, height, message))
         .collect()
 }
 
@@ -222,11 +236,13 @@ mod tests {
     use rand::prelude::*;
     use rand::rngs::StdRng;
 
+    const H: usize = 8;
+
     fn signed_fixture(seed: u64) -> (Signer, XmssSignature, [u8; 32]) {
         let mut rng = StdRng::seed_from_u64(seed);
         let mut user = User::new(&mut rng);
         let com = user.commit(b"a document to be blindly signed");
-        let mut signer = Signer::new(&mut rng, 8);
+        let mut signer = Signer::new(&mut rng, H);
         let sig = signer.sign(&com).expect("sign failed");
         let d = com_digest(&com);
         (signer, sig, d)
@@ -243,7 +259,7 @@ mod tests {
     fn xmss_sig_roundtrip_reconstructs_every_derived_field() {
         let (signer, sig, d) = signed_fixture(42);
         let bytes = write_xmss_sig(&sig);
-        let got = read_xmss_sig(&bytes, &signer.pk_seed(), &d).expect("read failed");
+        let got = read_xmss_sig(&bytes, &signer.pk_seed(), H, &d).expect("read failed");
 
         assert_eq!(got, sig);
         assert_eq!(
@@ -260,17 +276,17 @@ mod tests {
         let message = b"round-tripped through the wire format";
         let mut user = User::new(&mut rng);
         let com = user.commit(message);
-        let mut signer = Signer::new(&mut rng, 8);
+        let mut signer = Signer::new(&mut rng, H);
         let sig = signer.sign(&com).expect("sign failed");
 
         let bytes = write_xmss_sig(&sig);
         let parsed =
-            read_xmss_sig(&bytes, &signer.pk_seed(), &com_digest(&com)).expect("read failed");
+            read_xmss_sig(&bytes, &signer.pk_seed(), H, &com_digest(&com)).expect("read failed");
 
         let blind = user
             .prove(&parsed)
             .expect("prove from parsed signature failed");
-        let verifier = crate::Verifier::new(signer.public_key(), signer.pk_seed());
+        let verifier = crate::Verifier::new(signer.public_key(), signer.pk_seed(), H);
         verifier
             .verify(&read_blind_sig(&write_blind_sig(&blind)), message)
             .expect("blind signature must verify");
@@ -282,11 +298,11 @@ mod tests {
         let bytes = write_xmss_sig(&sig);
         let pk_seed = signer.pk_seed();
 
-        assert!(read_xmss_sig(&bytes[..bytes.len() - 1], &pk_seed, &d).is_none());
+        assert!(read_xmss_sig(&bytes[..bytes.len() - 1], &pk_seed, H, &d).is_none());
         let mut long = bytes.clone();
         long.push(0);
         assert!(
-            read_xmss_sig(&long, &pk_seed, &d).is_none(),
+            read_xmss_sig(&long, &pk_seed, H, &d).is_none(),
             "trailing bytes must be rejected"
         );
     }
@@ -296,11 +312,26 @@ mod tests {
         let (signer, sig, d) = signed_fixture(2);
         let bytes = write_xmss_sig(&sig);
 
-        assert!(read_xmss_sig(&bytes, &signer.pk_seed(), &[0xAAu8; 32]).is_none());
+        assert!(read_xmss_sig(&bytes, &signer.pk_seed(), H, &[0xAAu8; 32]).is_none());
 
         let mut wrong_seed = signer.pk_seed();
         wrong_seed[0] ^= 1;
-        assert!(read_xmss_sig(&bytes, &wrong_seed, &d).is_none());
+        assert!(read_xmss_sig(&bytes, &wrong_seed, H, &d).is_none());
+    }
+
+    #[test]
+    fn read_rejects_an_epoch_above_the_claimed_height() {
+        let mut rng = StdRng::seed_from_u64(4);
+        let mut user = User::new(&mut rng);
+        let com = user.commit(b"top half");
+        let mut signer = Signer::new(&mut rng, H);
+        let sk_seed = signer.sk_seed();
+        signer = Signer::from_key(&sk_seed, &signer.pk_seed(), 1 << (H - 1), H);
+        let sig = signer.sign(&com).expect("sign failed");
+        let bytes = write_xmss_sig(&sig);
+        let d = com_digest(&com);
+        assert!(read_xmss_sig(&bytes, &signer.pk_seed(), H, &d).is_some());
+        assert!(read_xmss_sig(&bytes, &signer.pk_seed(), H - 1, &d).is_none());
     }
 
     fn dummy_keys(n: usize) -> (Vec<SignerKey>, [u8; PK_SEED_BYTES]) {
@@ -314,10 +345,10 @@ mod tests {
     }
 
     #[test]
-    fn one_signer_key_and_pubkey_are_57_and_32_bytes() {
+    fn one_signer_key_and_pubkey_are_57_and_33_bytes() {
         let (keys, pk_seed) = dummy_keys(1);
         assert_eq!(write_signer_keys(&keys, &pk_seed, 32).len(), 57);
-        assert_eq!(write_signer_pub(&[[9u8; N]], &pk_seed).len(), 32);
+        assert_eq!(write_signer_pub(&[[9u8; N]], &pk_seed, 32).len(), 33);
     }
 
     #[test]
@@ -335,10 +366,11 @@ mod tests {
             }
 
             let roots: Vec<[u8; N]> = (0..n).map(|i| [i as u8 + 1; N]).collect();
-            let pub_bytes = write_signer_pub(&roots, &pk_seed);
-            let (got_roots, got_seed) = read_signer_pub(&pub_bytes).expect("read failed");
+            let pub_bytes = write_signer_pub(&roots, &pk_seed, 32);
+            let (got_roots, got_seed, got_h) = read_signer_pub(&pub_bytes).expect("read failed");
             assert_eq!(got_roots, roots);
             assert_eq!(got_seed, pk_seed);
+            assert_eq!(got_h, 32, "the height is part of the public key");
         }
     }
 
@@ -350,9 +382,17 @@ mod tests {
         assert!(read_signer_keys(&[]).is_none());
         assert!(read_signer_keys(&pk_seed).is_none());
 
-        let pub_bytes = write_signer_pub(&[[1u8; N], [2u8; N]], &pk_seed);
+        let pub_bytes = write_signer_pub(&[[1u8; N], [2u8; N]], &pk_seed, 10);
         assert!(read_signer_pub(&pub_bytes[..pub_bytes.len() - 1]).is_none());
         assert!(read_signer_pub(&pk_seed).is_none());
+        for bad_height in [0u8, 33] {
+            let mut bad = pub_bytes.clone();
+            *bad.last_mut().unwrap() = bad_height;
+            assert!(
+                read_signer_pub(&bad).is_none(),
+                "height {bad_height} must be rejected"
+            );
+        }
     }
 
     #[test]
@@ -384,12 +424,12 @@ mod tests {
         assert_eq!(bytes.len(), XMSS_SIG_BYTES);
 
         let two = write_xmss_sigs(&[sig.clone(), sig.clone()]);
-        let got = read_xmss_sigs(&two, &signer.pk_seed(), &d).expect("read failed");
+        let got = read_xmss_sigs(&two, &signer.pk_seed(), H, &d).expect("read failed");
         assert_eq!(got.len(), 2);
         assert!(got.iter().all(|g| g.root == sig.root));
 
-        assert!(read_xmss_sigs(&two[..two.len() - 1], &signer.pk_seed(), &d).is_none());
-        assert!(read_xmss_sigs(&[], &signer.pk_seed(), &d).is_none());
+        assert!(read_xmss_sigs(&two[..two.len() - 1], &signer.pk_seed(), H, &d).is_none());
+        assert!(read_xmss_sigs(&[], &signer.pk_seed(), H, &d).is_none());
     }
 
     #[test]
@@ -397,7 +437,7 @@ mod tests {
         let (signer, sig, d) = signed_fixture(3);
         let mut bytes = write_xmss_sig(&sig);
         bytes[4 + RANDOMNESS_LEN] ^= 1;
-        let got = read_xmss_sig(&bytes, &signer.pk_seed(), &d).expect("should still parse");
+        let got = read_xmss_sig(&bytes, &signer.pk_seed(), H, &d).expect("should still parse");
         assert_ne!(got.root, signer.public_key());
     }
 }

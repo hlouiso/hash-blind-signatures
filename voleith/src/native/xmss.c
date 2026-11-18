@@ -455,9 +455,11 @@ int xmss_sign(const uint8_t sk_seed[32], const uint8_t pk_seed[XMSS_PK_SEED_BYTE
     return ok;
 }
 
-int xmss_verify(const uint8_t pk_seed[XMSS_PK_SEED_BYTES], const xmss_node root, const uint8_t *message,
-                size_t message_len, const xmss_sig *sig)
+int xmss_verify(const uint8_t pk_seed[XMSS_PK_SEED_BYTES], const xmss_node root, int height,
+                const uint8_t *message, size_t message_len, const xmss_sig *sig)
 {
+    if (height < 1 || height > XMSS_H || (sig->leaf_index & xmss_leaf_index_mask(height)) != 0)
+        return 0;
     uint8_t mh[32];
     xmss_hash_message(pk_seed, sig->leaf_index, sig->nonce, XMSS_NONCE_LEN, message, message_len, mh);
     uint8_t coords[XMSS_WOTS_LEN];

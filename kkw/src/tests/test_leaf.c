@@ -29,7 +29,7 @@ static void run_leaf(uint32_t leaf)
 
     xmss_sig sig;
     if (!xmss_sign(sk_seed, pk_seed, XMSS_TEST_H, leaf, d, 32, &sig)) { printf("FAIL native sign\n"); exit(1); }
-    CHECK(xmss_verify(pk_seed, root, d, 32, &sig), "native signature verifies");
+    CHECK(xmss_verify(pk_seed, root, XMSS_TEST_H, d, 32, &sig), "native signature verifies");
 
     unsigned char input[W_END];
     memset(input, 0, W_END);
@@ -72,7 +72,7 @@ static void run_leaf(uint32_t leaf)
     uint32_t *s_all = malloc((size_t)N_PARTIES*ySize*sizeof(uint32_t));
     unsigned char r_j[32]; test_random_bytes(r_j, 32);
     a A; uint32_t zh[8];
-    building_views(&A, m_hat, pk_seed, d_pub, lam, tapes, aux, s_all, r_j, zh);
+    building_views(&A, m_hat, pk_seed, xmss_leaf_index_mask(XMSS_TEST_H), d_pub, lam, tapes, aux, s_all, r_j, zh);
 
     unsigned char circ_root[XMSS_NODE_BYTES];
     for (int w = 0; w < YP_ROOT_WORDS; w++) {
@@ -95,7 +95,7 @@ static void run_leaf(uint32_t leaf)
         memcpy(Z.r_j, r_j, 32);
         compute_msgs_e(e, s_all, Z.msgs_e);
         bool err = false; uint32_t zhc[8];
-        verify(m_hat, pk_seed, &err, &A, e, &Z, zhc);
+        verify(m_hat, pk_seed, xmss_leaf_index_mask(XMSS_TEST_H), &err, &A, e, &Z, zhc);
         char msg[64]; snprintf(msg, sizeof msg, "verify() accepts honest proof (e=%d)", e);
         CHECK(!err, msg);
         int bind_ok = 1;
@@ -108,6 +108,18 @@ static void run_leaf(uint32_t leaf)
         CHECK(memcmp(A.h_prime, hp_prover, 32) == 0,
               "verify() recomputes the prover's h'_j");
         free(Z.x_offset); free(Z.msgs_e);
+    }
+
+    /* The same views under height h-1: the epoch word must flag the leaf
+     * exactly when it is at or above 2^(h-1), which the proof binds to zero. */
+    {
+        a B; uint32_t zh_low[8];
+        building_views(&B, m_hat, pk_seed, xmss_leaf_index_mask(XMSS_TEST_H - 1), d_pub,
+                       lam, tapes, aux, NULL, NULL, zh_low);
+        uint32_t high = zh_low[YP_EPOCH_WORD];
+        for (int p = 0; p < N_PARTIES; p++) high ^= B.yp[p][YP_EPOCH_WORD];
+        CHECK(high == (leaf & xmss_leaf_index_mask(XMSS_TEST_H - 1)),
+              "epoch word is the leaf index under the height-(h-1) mask");
     }
 
     for (int p = 0; p < N_PARTIES; p++) { free(lam[p]); free(tapes[p]); }

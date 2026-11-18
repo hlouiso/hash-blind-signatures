@@ -124,7 +124,7 @@ static int cmd_keygen(int height)
 
     uint8_t key_buf[BLIND_SIGNER_KEY_BYTES], pub_buf[BLIND_SIGNER_PUB_BYTES];
     blind_write_signer_key(&key, key_buf);
-    blind_write_signer_pub(root, key.pk_seed, pub_buf);
+    blind_write_signer_pub(root, key.pk_seed, key.height, pub_buf);
     if (!write_file(key_path, key_buf, sizeof key_buf) ||
         !write_file(pub_path, pub_buf, sizeof pub_buf))
     {
@@ -269,9 +269,10 @@ static int cmd_prove(void)
     blind_user_state st = {0};
     xmss_node root;
     uint8_t pk_seed[XMSS_PK_SEED_BYTES];
+    int height = 0;
     xmss_sig sig;
     int ok = pub_buf && sig_buf && blind_read_user_state(state_buf, state_len, &st) &&
-             blind_read_signer_pub(pub_buf, pub_len, root, pk_seed) &&
+             blind_read_signer_pub(pub_buf, pub_len, root, pk_seed, &height) &&
              xmss_read_sig(sig_buf, sig_len, &sig);
     free(state_buf);
     free(pub_buf);
@@ -285,7 +286,7 @@ static int cmd_prove(void)
 
     uint8_t d[32];
     hm_digest(st.com, d);
-    if (!xmss_verify(pk_seed, root, d, sizeof d, &sig))
+    if (!xmss_verify(pk_seed, root, height, d, sizeof d, &sig))
     {
         fprintf(stderr, "error: xmss_sig.bin is not a signature on this commitment "
                         "under signer_pub.bin\n");
@@ -305,7 +306,7 @@ static int cmd_prove(void)
     }
     kkw_verbose = 0;
     double t0 = now_ms();
-    int rc = blind_user_prove(&st, pk_seed, root, &sig, out);
+    int rc = blind_user_prove(&st, pk_seed, root, height, &sig, out);
     double prove_ms = now_ms() - t0;
     long proof_bytes = ftell(out);
     int closed = fclose(out);
@@ -333,7 +334,8 @@ static int cmd_verify(const char *msg_file)
     uint8_t *pub_buf = read_file(pub_path, &pub_len);
     xmss_node root;
     uint8_t pk_seed[XMSS_PK_SEED_BYTES];
-    int ok = pub_buf && blind_read_signer_pub(pub_buf, pub_len, root, pk_seed);
+    int height = 0;
+    int ok = pub_buf && blind_read_signer_pub(pub_buf, pub_len, root, pk_seed, &height);
     free(pub_buf);
     if (!ok)
     {
@@ -363,7 +365,7 @@ static int cmd_verify(const char *msg_file)
     fflush(stdout);
 
     double t0 = now_ms();
-    int valid = blind_verify_sig(proof, msg, msg_len, pk_seed, root);
+    int valid = blind_verify_sig(proof, msg, msg_len, pk_seed, root, height);
     double verify_ms = now_ms() - t0;
     fclose(proof);
     free(msg);
