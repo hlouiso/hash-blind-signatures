@@ -394,18 +394,23 @@ class Circuit {
     auto digest = hash(msg_dom, msg);
     e.zero(digest[63]);
     e.zero(digest[127]);
-    std::array<Bits, 42> coords, tips, ends;
+    using Packed = decltype(e.pack(digest));
+    std::array<Packed, 42> coords, tips, ends;
+    Bits endpoints;
     auto total = number(0, 9);
     for (size_t i = 0; i < 42; ++i) {
-      coords[i] = slice(digest, xmss_coord_bit_pos(i), 3);
-      auto term = coords[i];
+      const auto digit = slice(digest, xmss_coord_bit_pos(i), 3);
+      coords[i] = e.pack(digit);
+      auto term = digit;
       term.resize(9, e.constant(0));
       total = add(total, term);
-      tips[i] = input(kSigOffset + 28 + 16 * i, 16);
-      ends[i] = input(kEndpointsOffset + 16 * i, 16);
-      auto complete = equal(coords[i], number(7, 3));
+      tips[i] = e.pack(input(kSigOffset + 28 + 16 * i, 16));
+      const auto end = input(kEndpointsOffset + 16 * i, 16);
+      ends[i] = e.pack(end);
+      append(endpoints, end);
+      auto complete = equal(digit, number(7, 3));
       e.zero(e.product(e.pack(std::span(&complete, 1)),
-                       e.pack(tips[i]) + e.pack(ends[i])));
+                       tips[i] + ends[i]));
     }
     equal_field(total, number(195, 9));
     auto previous_index = number(0, 8), previous_pos = number(0, 3),
@@ -422,17 +427,15 @@ class Circuit {
         e.zero(e.product(e.pack(std::span(&same, 1)) + e.pack(number(1, 1)),
                          e.pack(previous_pos) + e.pack(number(7, 3))));
       }
-      auto selected_tip =
-          e.product(e.pack(std::span(&flags[0], 1)), e.pack(tips[0]));
-      auto selected_end =
-          e.product(e.pack(std::span(&flags[0], 1)), e.pack(ends[0]));
-      auto selected_coord =
-          e.product(e.pack(std::span(&flags[0], 1)), e.pack(coords[0]));
+      const auto first_flag = e.pack(std::span(&flags[0], 1));
+      auto selected_tip = e.product(first_flag, tips[0]);
+      auto selected_end = e.product(first_flag, ends[0]);
+      auto selected_coord = e.product(first_flag, coords[0]);
       for (size_t i = 1; i < 42; ++i) {
         auto flag = e.pack(std::span(&flags[i], 1));
-        selected_tip = selected_tip + e.product(flag, e.pack(tips[i]));
-        selected_end = selected_end + e.product(flag, e.pack(ends[i]));
-        selected_coord = selected_coord + e.product(flag, e.pack(coords[i]));
+        selected_tip = selected_tip + e.product(flag, tips[i]);
+        selected_end = selected_end + e.product(flag, ends[i]);
+        selected_coord = selected_coord + e.product(flag, coords[i]);
       }
       auto coordinate = e.field_witness(selected_coord, 3);
       auto position =
@@ -457,8 +460,6 @@ class Circuit {
       previous_out = out_node;
     }
     equal_field(previous_pos, number(7, 3));
-    Bits endpoints;
-    for (const auto& end : ends) append(endpoints, end);
     auto leaf_dom = seed;
     append(leaf_dom, number(XMSS_TWEAK_LEAF, 8));
     append(leaf_dom, epoch_be);

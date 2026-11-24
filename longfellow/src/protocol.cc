@@ -26,7 +26,7 @@ class NonceAttemptRng final : public Rng {
     key_ = hmac_sha256(sk_seed, kSkSeedBytes, kNoncePrfLabel,
                        sizeof(kNoncePrfLabel) - 1);
 
-    context_.reserve(kPkSeedBytes + 4 + kHashBytes);
+    context_.reserve(kPkSeedBytes + 4 + kHashBytes + 4);
     context_.insert(context_.end(), pk_seed.begin(), pk_seed.end());
     push_u32le(context_, leaf);
     context_.insert(context_.end(), commitment_digest.begin(),
@@ -36,9 +36,10 @@ class NonceAttemptRng final : public Rng {
   void fill_bytes(uint8_t* out, size_t n) override {
     proofs::check(n == kNonceLength,
                   "NonceAttemptRng requires one full nonce");
-    Bytes input = context_;
-    push_u32le(input, attempt_++);
-    const Hash block = hmac_sha256(key_, input);
+    const size_t prefix_len = context_.size();
+    push_u32le(context_, attempt_++);
+    const Hash block = hmac_sha256(key_, context_);
+    context_.resize(prefix_len);
     std::memcpy(out, block.data(), n);
   }
 

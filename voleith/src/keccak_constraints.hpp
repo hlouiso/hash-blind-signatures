@@ -204,135 +204,23 @@ void keccak_backward(QS* qs_state, size_t round_idx,
   }
   add_lane(get_lane(state_in, 0, 0), get_lane(state_in, 0, 0), round_const);
 
-  for (size_t y = 0; y < 5; y++) {
-    quicksilver_gfsecpar<QS, deg_in + deg_in>
-        tmp_state_muldeg2[VOLEKECCAK_W * 4];
-    quicksilver_gfsecpar<QS, deg_out> tmp_state_muldeg3[VOLEKECCAK_W];
-
-    mul_lane(get_lane(tmp_state_muldeg2, 0, 0), get_lane(state_in, y, 1),
-             get_lane(state_in, y, 2));
-    mul_lane(get_lane(tmp_state_muldeg2, 0, 1), get_lane(state_in, y, 1),
-             get_lane(state_in, y, 4));
-    mul_lane(get_lane(tmp_state_muldeg2, 0, 2), get_lane(state_in, y, 3),
-             get_lane(state_in, y, 4));
-
-    mul_lane(get_lane(tmp_state_muldeg2, 0, 3), get_lane(state_in, y, 1),
-             get_lane(state_in, y, 3));
-    mul_lane(get_lane(tmp_state_muldeg3, 0, 0),
-             get_lane(tmp_state_muldeg2, 0, 3), get_lane(state_in, y, 4));
-
-    add_lane(get_lane(state_out, y, 0), get_lane(state_in, y, 0),
-             get_lane(state_in, y, 2));
-    add_lane(get_lane(state_out, y, 0), get_lane(state_out, y, 0),
-             get_lane(state_in, y, 4));
-    add_lane(get_lane(state_out, y, 0), get_lane(state_out, y, 0),
-             get_lane(tmp_state_muldeg2, 0, 0));
-    add_lane(get_lane(state_out, y, 0), get_lane(state_out, y, 0),
-             get_lane(tmp_state_muldeg2, 0, 1));
-    add_lane(get_lane(state_out, y, 0), get_lane(state_out, y, 0),
-             get_lane(tmp_state_muldeg2, 0, 2));
-    add_lane(get_lane(state_out, y, 0), get_lane(state_out, y, 0),
-             get_lane(tmp_state_muldeg3, 0, 0));
-
-    mul_lane(get_lane(tmp_state_muldeg2, 0, 0), get_lane(state_in, y, 0),
-             get_lane(state_in, y, 2));
-    mul_lane(get_lane(tmp_state_muldeg2, 0, 1), get_lane(state_in, y, 0),
-             get_lane(state_in, y, 4));
-    mul_lane(get_lane(tmp_state_muldeg2, 0, 2), get_lane(state_in, y, 2),
-             get_lane(state_in, y, 3));
-
-    mul_lane(get_lane(tmp_state_muldeg2, 0, 3), get_lane(state_in, y, 0),
-             get_lane(state_in, y, 2));
-    mul_lane(get_lane(tmp_state_muldeg3, 0, 0),
-             get_lane(tmp_state_muldeg2, 0, 3), get_lane(state_in, y, 4));
-
-    add_lane(get_lane(state_out, y, 1), get_lane(state_in, y, 0),
-             get_lane(state_in, y, 1));
-    add_lane(get_lane(state_out, y, 1), get_lane(state_out, y, 1),
-             get_lane(state_in, y, 3));
-    add_lane(get_lane(state_out, y, 1), get_lane(state_out, y, 1),
-             get_lane(tmp_state_muldeg2, 0, 0));
-    add_lane(get_lane(state_out, y, 1), get_lane(state_out, y, 1),
-             get_lane(tmp_state_muldeg2, 0, 1));
-    add_lane(get_lane(state_out, y, 1), get_lane(state_out, y, 1),
-             get_lane(tmp_state_muldeg2, 0, 2));
-    add_lane(get_lane(state_out, y, 1), get_lane(state_out, y, 1),
-             get_lane(tmp_state_muldeg3, 0, 0));
-
-    mul_lane(get_lane(tmp_state_muldeg2, 0, 0), get_lane(state_in, y, 0),
-             get_lane(state_in, y, 1));
-    mul_lane(get_lane(tmp_state_muldeg2, 0, 1), get_lane(state_in, y, 1),
-             get_lane(state_in, y, 3));
-    mul_lane(get_lane(tmp_state_muldeg2, 0, 2), get_lane(state_in, y, 3),
-             get_lane(state_in, y, 4));
-
-    mul_lane(get_lane(tmp_state_muldeg2, 0, 3), get_lane(state_in, y, 0),
-             get_lane(state_in, y, 1));
-    mul_lane(get_lane(tmp_state_muldeg3, 0, 0),
-             get_lane(tmp_state_muldeg2, 0, 3), get_lane(state_in, y, 3));
-
-    add_lane(get_lane(state_out, y, 2), get_lane(state_in, y, 1),
-             get_lane(state_in, y, 2));
-    add_lane(get_lane(state_out, y, 2), get_lane(state_out, y, 2),
-             get_lane(state_in, y, 4));
-    add_lane(get_lane(state_out, y, 2), get_lane(state_out, y, 2),
-             get_lane(tmp_state_muldeg2, 0, 0));
-    add_lane(get_lane(state_out, y, 2), get_lane(state_out, y, 2),
-             get_lane(tmp_state_muldeg2, 0, 1));
-    add_lane(get_lane(state_out, y, 2), get_lane(state_out, y, 2),
-             get_lane(tmp_state_muldeg2, 0, 2));
-    add_lane(get_lane(state_out, y, 2), get_lane(state_out, y, 2),
-             get_lane(tmp_state_muldeg3, 0, 0));
-
-    mul_lane(get_lane(tmp_state_muldeg2, 0, 0), get_lane(state_in, y, 0),
-             get_lane(state_in, y, 4));
-    mul_lane(get_lane(tmp_state_muldeg2, 0, 1), get_lane(state_in, y, 1),
-             get_lane(state_in, y, 2));
-    mul_lane(get_lane(tmp_state_muldeg2, 0, 2), get_lane(state_in, y, 2),
-             get_lane(state_in, y, 4));
-
-    mul_lane(get_lane(tmp_state_muldeg2, 0, 3), get_lane(state_in, y, 1),
-             get_lane(state_in, y, 2));
-    mul_lane(get_lane(tmp_state_muldeg3, 0, 0),
-             get_lane(tmp_state_muldeg2, 0, 3), get_lane(state_in, y, 4));
-
-    add_lane(get_lane(state_out, y, 3), get_lane(state_in, y, 0),
-             get_lane(state_in, y, 2));
-    add_lane(get_lane(state_out, y, 3), get_lane(state_out, y, 3),
-             get_lane(state_in, y, 3));
-    add_lane(get_lane(state_out, y, 3), get_lane(state_out, y, 3),
-             get_lane(tmp_state_muldeg2, 0, 0));
-    add_lane(get_lane(state_out, y, 3), get_lane(state_out, y, 3),
-             get_lane(tmp_state_muldeg2, 0, 1));
-    add_lane(get_lane(state_out, y, 3), get_lane(state_out, y, 3),
-             get_lane(tmp_state_muldeg2, 0, 2));
-    add_lane(get_lane(state_out, y, 3), get_lane(state_out, y, 3),
-             get_lane(tmp_state_muldeg3, 0, 0));
-
-    mul_lane(get_lane(tmp_state_muldeg2, 0, 0), get_lane(state_in, y, 0),
-             get_lane(state_in, y, 1));
-    mul_lane(get_lane(tmp_state_muldeg2, 0, 1), get_lane(state_in, y, 0),
-             get_lane(state_in, y, 3));
-    mul_lane(get_lane(tmp_state_muldeg2, 0, 2), get_lane(state_in, y, 2),
-             get_lane(state_in, y, 3));
-
-    mul_lane(get_lane(tmp_state_muldeg2, 0, 3), get_lane(state_in, y, 0),
-             get_lane(state_in, y, 2));
-    mul_lane(get_lane(tmp_state_muldeg3, 0, 0),
-             get_lane(tmp_state_muldeg2, 0, 3), get_lane(state_in, y, 3));
-
-    add_lane(get_lane(state_out, y, 4), get_lane(state_in, y, 1),
-             get_lane(state_in, y, 3));
-    add_lane(get_lane(state_out, y, 4), get_lane(state_out, y, 4),
-             get_lane(state_in, y, 4));
-    add_lane(get_lane(state_out, y, 4), get_lane(state_out, y, 4),
-             get_lane(tmp_state_muldeg2, 0, 0));
-    add_lane(get_lane(state_out, y, 4), get_lane(state_out, y, 4),
-             get_lane(tmp_state_muldeg2, 0, 1));
-    add_lane(get_lane(state_out, y, 4), get_lane(state_out, y, 4),
-             get_lane(tmp_state_muldeg2, 0, 2));
-    add_lane(get_lane(state_out, y, 4), get_lane(state_out, y, 4),
-             get_lane(tmp_state_muldeg3, 0, 0));
+  // Inverse chi on a five-lane row, factored over characteristic two:
+  // a_i = b_i + (1 + b_{i+1}) (b_{i+2} + (1 + b_{i+3}) b_{i+4}).
+  const uint8_t one_byte = 1;
+  const auto one = load_const_1_bit_and_combine(qs_state, &one_byte, 0);
+  for (size_t row = 0; row < 5; ++row) {
+    for (size_t x = 0; x < 5; ++x) {
+      const auto* b0 = get_lane(state_in, row, x);
+      const auto* b1 = get_lane(state_in, row, (x + 1) % 5);
+      const auto* b2 = get_lane(state_in, row, (x + 2) % 5);
+      const auto* b3 = get_lane(state_in, row, (x + 3) % 5);
+      const auto* b4 = get_lane(state_in, row, (x + 4) % 5);
+      auto* out = get_lane(state_out, row, x);
+      for (size_t z = 0; z < VOLEKECCAK_W; ++z) {
+        const auto inner = (b3[z] + one) * b4[z] + b2[z];
+        out[z] = inner * (b1[z] + one) + b0[z];
+      }
+    }
   }
 
   quicksilver_gfsecpar<QS, deg_out> state_tmp[VOLEKECCAK_B];

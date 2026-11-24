@@ -269,10 +269,18 @@ impl XmssKeyPair {
         let param = build_wots_domain_param(pk_seed);
         let top_h = height - subtree_h;
 
-        let subtree_roots: Vec<Digest> = (0..1u32 << top_h)
-            .into_par_iter()
-            .map(|s| build_subtree(sk_seed, &param, s, subtree_h)[subtree_h][0])
-            .collect();
+        // When the real tree fits in one subtree, the nodes just built are
+        // exactly the authentication-path cache for every signature.
+        let (subtree_roots, bottom) = if top_h == 0 {
+            let levels = build_subtree(sk_seed, &param, 0, subtree_h);
+            (vec![levels[subtree_h][0]], Some((0, levels)))
+        } else {
+            let roots = (0..1u32 << top_h)
+                .into_par_iter()
+                .map(|s| build_subtree(sk_seed, &param, s, subtree_h)[subtree_h][0])
+                .collect();
+            (roots, None)
+        };
 
         let top = build_top(&param, subtree_roots, subtree_h, top_h);
         let upper = derive_upper_siblings(sk_seed, LOG_LIFETIME - height);
@@ -285,7 +293,7 @@ impl XmssKeyPair {
             height,
             subtree_h,
             top,
-            bottom: None,
+            bottom,
             upper,
             next_leaf: 0,
         }

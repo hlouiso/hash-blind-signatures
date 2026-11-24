@@ -8,8 +8,8 @@ FetchContent_Declare(voleith_faest
   URL_HASH SHA256=a759200288b12535862acd38d0f431af1f2b4e33d4cdf03147b6c250608a41a6
   SOURCE_SUBDIR _download_only)
 FetchContent_Declare(voleith_xkcp
-  URL https://codeload.github.com/XKCP/XKCP/tar.gz/4affab454735d54e78156880b3b44e38dcbf765c
-  URL_HASH SHA256=42055374a213ba8cedbfaa76ce80e184ed515f111eb0e7d82ac1df2ba0eda1d0
+  URL https://codeload.github.com/XKCP/XKCP/tar.gz/d789b57c26dd7d5f628f7527c2bd006bc33b6a93
+  URL_HASH SHA256=46089d678147f0abee156272d4cc75303b723176bf4e2edc32a3df84013f54e4
   SOURCE_SUBDIR _download_only)
 FetchContent_Declare(voleith_pomfrit
   URL https://codeload.github.com/shibammukherjee/pq_blind_signatures/tar.gz/b984d1f141e318a351af9a660a3e6cee26307b65

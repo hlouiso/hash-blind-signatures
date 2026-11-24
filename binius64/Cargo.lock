@@ -56,9 +56,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "binius-alloc"
+version = "0.1.0"
+source = "git+https://github.com/binius-zk/binius64.git?rev=487127b4af96f5d0c0bf2c960fcd0c706ef13b11#487127b4af96f5d0c0bf2c960fcd0c706ef13b11"
+dependencies = [
+ "rayon",
+]
+
+[[package]]
 name = "binius-circuits"
 version = "0.1.0"
-source = "git+https://github.com/binius-zk/binius64.git?rev=a62421f41057dcad9395fa5ef1c7fa0b68862d5a#a62421f41057dcad9395fa5ef1c7fa0b68862d5a"
+source = "git+https://github.com/binius-zk/binius64.git?rev=487127b4af96f5d0c0bf2c960fcd0c706ef13b11#487127b4af96f5d0c0bf2c960fcd0c706ef13b11"
 dependencies = [
  "binius-core",
  "binius-frontend",
@@ -71,17 +79,9 @@ dependencies = [
 ]
 
 [[package]]
-name = "binius-compute"
-version = "0.1.0"
-source = "git+https://github.com/binius-zk/binius64.git?rev=a62421f41057dcad9395fa5ef1c7fa0b68862d5a#a62421f41057dcad9395fa5ef1c7fa0b68862d5a"
-dependencies = [
- "rayon",
-]
-
-[[package]]
 name = "binius-core"
 version = "0.1.0"
-source = "git+https://github.com/binius-zk/binius64.git?rev=a62421f41057dcad9395fa5ef1c7fa0b68862d5a#a62421f41057dcad9395fa5ef1c7fa0b68862d5a"
+source = "git+https://github.com/binius-zk/binius64.git?rev=487127b4af96f5d0c0bf2c960fcd0c706ef13b11#487127b4af96f5d0c0bf2c960fcd0c706ef13b11"
 dependencies = [
  "binius-field",
  "binius-utils",
@@ -94,7 +94,7 @@ dependencies = [
 [[package]]
 name = "binius-field"
 version = "0.1.0"
-source = "git+https://github.com/binius-zk/binius64.git?rev=a62421f41057dcad9395fa5ef1c7fa0b68862d5a#a62421f41057dcad9395fa5ef1c7fa0b68862d5a"
+source = "git+https://github.com/binius-zk/binius64.git?rev=487127b4af96f5d0c0bf2c960fcd0c706ef13b11#487127b4af96f5d0c0bf2c960fcd0c706ef13b11"
 dependencies = [
  "binius-utils",
  "bytemuck",
@@ -107,9 +107,9 @@ dependencies = [
 [[package]]
 name = "binius-frontend"
 version = "0.1.0"
-source = "git+https://github.com/binius-zk/binius64.git?rev=a62421f41057dcad9395fa5ef1c7fa0b68862d5a#a62421f41057dcad9395fa5ef1c7fa0b68862d5a"
+source = "git+https://github.com/binius-zk/binius64.git?rev=487127b4af96f5d0c0bf2c960fcd0c706ef13b11#487127b4af96f5d0c0bf2c960fcd0c706ef13b11"
 dependencies = [
- "binius-compute",
+ "binius-alloc",
  "binius-core",
  "binius-field",
  "binius-utils",
@@ -126,7 +126,7 @@ dependencies = [
 [[package]]
 name = "binius-hash"
 version = "0.1.0"
-source = "git+https://github.com/binius-zk/binius64.git?rev=a62421f41057dcad9395fa5ef1c7fa0b68862d5a#a62421f41057dcad9395fa5ef1c7fa0b68862d5a"
+source = "git+https://github.com/binius-zk/binius64.git?rev=487127b4af96f5d0c0bf2c960fcd0c706ef13b11#487127b4af96f5d0c0bf2c960fcd0c706ef13b11"
 dependencies = [
  "binius-utils",
  "blake3",
@@ -139,9 +139,9 @@ dependencies = [
 [[package]]
 name = "binius-hash-prover"
 version = "0.1.0"
-source = "git+https://github.com/binius-zk/binius64.git?rev=a62421f41057dcad9395fa5ef1c7fa0b68862d5a#a62421f41057dcad9395fa5ef1c7fa0b68862d5a"
+source = "git+https://github.com/binius-zk/binius64.git?rev=487127b4af96f5d0c0bf2c960fcd0c706ef13b11#487127b4af96f5d0c0bf2c960fcd0c706ef13b11"
 dependencies = [
- "binius-compute",
+ "binius-alloc",
  "binius-field",
  "binius-hash",
  "binius-utils",
@@ -159,7 +159,7 @@ dependencies = [
 [[package]]
 name = "binius-iop"
 version = "0.1.0"
-source = "git+https://github.com/binius-zk/binius64.git?rev=a62421f41057dcad9395fa5ef1c7fa0b68862d5a#a62421f41057dcad9395fa5ef1c7fa0b68862d5a"
+source = "git+https://github.com/binius-zk/binius64.git?rev=487127b4af96f5d0c0bf2c960fcd0c706ef13b11#487127b4af96f5d0c0bf2c960fcd0c706ef13b11"
 dependencies = [
  "binius-core",
  "binius-field",
@@ -177,9 +177,9 @@ dependencies = [
 [[package]]
 name = "binius-iop-prover"
 version = "0.1.0"
-source = "git+https://github.com/binius-zk/binius64.git?rev=a62421f41057dcad9395fa5ef1c7fa0b68862d5a#a62421f41057dcad9395fa5ef1c7fa0b68862d5a"
+source = "git+https://github.com/binius-zk/binius64.git?rev=487127b4af96f5d0c0bf2c960fcd0c706ef13b11#487127b4af96f5d0c0bf2c960fcd0c706ef13b11"
 dependencies = [
- "binius-compute",
+ "binius-alloc",
  "binius-core",
  "binius-field",
  "binius-hash",
@@ -200,7 +200,7 @@ dependencies = [
 [[package]]
 name = "binius-ip"
 version = "0.1.0"
-source = "git+https://github.com/binius-zk/binius64.git?rev=a62421f41057dcad9395fa5ef1c7fa0b68862d5a#a62421f41057dcad9395fa5ef1c7fa0b68862d5a"
+source = "git+https://github.com/binius-zk/binius64.git?rev=487127b4af96f5d0c0bf2c960fcd0c706ef13b11#487127b4af96f5d0c0bf2c960fcd0c706ef13b11"
 dependencies = [
  "array-util",
  "binius-core",
@@ -214,10 +214,10 @@ dependencies = [
 [[package]]
 name = "binius-ip-prover"
 version = "0.1.0"
-source = "git+https://github.com/binius-zk/binius64.git?rev=a62421f41057dcad9395fa5ef1c7fa0b68862d5a#a62421f41057dcad9395fa5ef1c7fa0b68862d5a"
+source = "git+https://github.com/binius-zk/binius64.git?rev=487127b4af96f5d0c0bf2c960fcd0c706ef13b11#487127b4af96f5d0c0bf2c960fcd0c706ef13b11"
 dependencies = [
  "auto_impl",
- "binius-compute",
+ "binius-alloc",
  "binius-core",
  "binius-field",
  "binius-ip",
@@ -232,9 +232,9 @@ dependencies = [
 [[package]]
 name = "binius-math"
 version = "0.1.0"
-source = "git+https://github.com/binius-zk/binius64.git?rev=a62421f41057dcad9395fa5ef1c7fa0b68862d5a#a62421f41057dcad9395fa5ef1c7fa0b68862d5a"
+source = "git+https://github.com/binius-zk/binius64.git?rev=487127b4af96f5d0c0bf2c960fcd0c706ef13b11#487127b4af96f5d0c0bf2c960fcd0c706ef13b11"
 dependencies = [
- "binius-compute",
+ "binius-alloc",
  "binius-field",
  "binius-utils",
  "bytemuck",
@@ -247,9 +247,9 @@ dependencies = [
 [[package]]
 name = "binius-prover"
 version = "0.1.0"
-source = "git+https://github.com/binius-zk/binius64.git?rev=a62421f41057dcad9395fa5ef1c7fa0b68862d5a#a62421f41057dcad9395fa5ef1c7fa0b68862d5a"
+source = "git+https://github.com/binius-zk/binius64.git?rev=487127b4af96f5d0c0bf2c960fcd0c706ef13b11#487127b4af96f5d0c0bf2c960fcd0c706ef13b11"
 dependencies = [
- "binius-compute",
+ "binius-alloc",
  "binius-core",
  "binius-field",
  "binius-hash",
@@ -278,7 +278,7 @@ dependencies = [
 [[package]]
 name = "binius-spartan-frontend"
 version = "0.1.0"
-source = "git+https://github.com/binius-zk/binius64.git?rev=a62421f41057dcad9395fa5ef1c7fa0b68862d5a#a62421f41057dcad9395fa5ef1c7fa0b68862d5a"
+source = "git+https://github.com/binius-zk/binius64.git?rev=487127b4af96f5d0c0bf2c960fcd0c706ef13b11#487127b4af96f5d0c0bf2c960fcd0c706ef13b11"
 dependencies = [
  "binius-field",
  "binius-utils",
@@ -289,9 +289,9 @@ dependencies = [
 [[package]]
 name = "binius-spartan-prover"
 version = "0.1.0"
-source = "git+https://github.com/binius-zk/binius64.git?rev=a62421f41057dcad9395fa5ef1c7fa0b68862d5a#a62421f41057dcad9395fa5ef1c7fa0b68862d5a"
+source = "git+https://github.com/binius-zk/binius64.git?rev=487127b4af96f5d0c0bf2c960fcd0c706ef13b11#487127b4af96f5d0c0bf2c960fcd0c706ef13b11"
 dependencies = [
- "binius-compute",
+ "binius-alloc",
  "binius-core",
  "binius-field",
  "binius-hash",
@@ -315,7 +315,7 @@ dependencies = [
 [[package]]
 name = "binius-spartan-verifier"
 version = "0.1.0"
-source = "git+https://github.com/binius-zk/binius64.git?rev=a62421f41057dcad9395fa5ef1c7fa0b68862d5a#a62421f41057dcad9395fa5ef1c7fa0b68862d5a"
+source = "git+https://github.com/binius-zk/binius64.git?rev=487127b4af96f5d0c0bf2c960fcd0c706ef13b11#487127b4af96f5d0c0bf2c960fcd0c706ef13b11"
 dependencies = [
  "binius-core",
  "binius-field",
@@ -333,7 +333,7 @@ dependencies = [
 [[package]]
 name = "binius-transcript"
 version = "0.1.0"
-source = "git+https://github.com/binius-zk/binius64.git?rev=a62421f41057dcad9395fa5ef1c7fa0b68862d5a#a62421f41057dcad9395fa5ef1c7fa0b68862d5a"
+source = "git+https://github.com/binius-zk/binius64.git?rev=487127b4af96f5d0c0bf2c960fcd0c706ef13b11#487127b4af96f5d0c0bf2c960fcd0c706ef13b11"
 dependencies = [
  "auto_impl",
  "binius-field",
@@ -347,7 +347,7 @@ dependencies = [
 [[package]]
 name = "binius-utils"
 version = "0.1.0"
-source = "git+https://github.com/binius-zk/binius64.git?rev=a62421f41057dcad9395fa5ef1c7fa0b68862d5a#a62421f41057dcad9395fa5ef1c7fa0b68862d5a"
+source = "git+https://github.com/binius-zk/binius64.git?rev=487127b4af96f5d0c0bf2c960fcd0c706ef13b11#487127b4af96f5d0c0bf2c960fcd0c706ef13b11"
 dependencies = [
  "array-util",
  "bytes",
@@ -360,7 +360,7 @@ dependencies = [
 [[package]]
 name = "binius-verifier"
 version = "0.1.0"
-source = "git+https://github.com/binius-zk/binius64.git?rev=a62421f41057dcad9395fa5ef1c7fa0b68862d5a#a62421f41057dcad9395fa5ef1c7fa0b68862d5a"
+source = "git+https://github.com/binius-zk/binius64.git?rev=487127b4af96f5d0c0bf2c960fcd0c706ef13b11#487127b4af96f5d0c0bf2c960fcd0c706ef13b11"
 dependencies = [
  "binius-core",
  "binius-field",
@@ -401,8 +401,8 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "bincode",
+ "binius-alloc",
  "binius-circuits",
- "binius-compute",
  "binius-core",
  "binius-field",
  "binius-frontend",

@@ -1,6 +1,14 @@
 #include "wots.h"
 
+#include <algorithm>
+
 namespace blind_longfellow {
+
+namespace {
+bool unused_bits_zero(const uint8_t* hash) {
+  return ((hash[7] | hash[15]) & 0x80) == 0;
+}
+}
 
 std::vector<uint8_t> extract_coords(const uint8_t* hash, bool* leftover_ok) {
   std::vector<uint8_t> coords;
@@ -15,7 +23,7 @@ std::vector<uint8_t> extract_coords(const uint8_t* hash, bool* leftover_ok) {
     coords.push_back(c);
   }
   if (leftover_ok != nullptr) {
-    *leftover_ok = ((hash[7] >> 7) | (hash[15] >> 7)) == 0;
+    *leftover_ok = unused_bits_zero(hash);
   }
   return coords;
 }
@@ -24,19 +32,19 @@ GrindResult grind_nonce(const WinternitzSpec& spec, Rng& rng,
                         const Bytes& param, uint32_t epoch,
                         const uint8_t* message, size_t message_len) {
   Bytes nonce(kNonceLength, 0);
+  Bytes tweaked = build_message_hash(param, epoch, nonce.data(), nonce.size(),
+                                     message, message_len);
+  auto* nonce_slot = tweaked.data() + param.size() + 1 + kEpochBytes;
   for (;;) {
-    rng.fill_bytes(nonce.data(), nonce.size());
-    const Hash h = hash_message(param, epoch, nonce.data(), nonce.size(),
-                                message, message_len);
-    bool leftover_ok = false;
-    std::vector<uint8_t> coords = extract_coords(h.data(), &leftover_ok);
-    if (!leftover_ok) continue;
+    rng.fill_bytes(nonce_slot, nonce.size());
+    const Hash h = sha256(tweaked);
+    if (!unused_bits_zero(h.data())) continue;
+    std::vector<uint8_t> coords = extract_coords(h.data(), nullptr);
     uint64_t sum = 0;
     for (uint8_t c : coords) sum += c;
     if (sum == spec.target_sum) {
-      Bytes tweaked = build_message_hash(param, epoch, nonce.data(),
-                                         nonce.size(), message, message_len);
-      return GrindResult{std::move(tweaked), std::move(coords), nonce};
+      std::copy_n(nonce_slot, nonce.size(), nonce.begin());
+      return GrindResult{std::move(tweaked), std::move(coords), std::move(nonce)};
     }
   }
 }

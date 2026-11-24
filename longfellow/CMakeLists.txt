@@ -12,7 +12,7 @@ include(FetchContent)
 FetchContent_Declare(
   longfellow
   GIT_REPOSITORY https://github.com/google/longfellow-zk.git
-  GIT_TAG        5f348de0bedcc49fe3800a57f6bf2eecd0389391
+  GIT_TAG        1424f50e4eacd50354f6743e57fb7a3a390ca7d7
 )
 FetchContent_MakeAvailable(longfellow)
 set(LONGFELLOW_LIB "${longfellow_SOURCE_DIR}/lib")

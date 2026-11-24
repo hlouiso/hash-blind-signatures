@@ -30,10 +30,11 @@ CMake downloads the following pinned dependencies into the build directory
   against the independent permutation and all theta basis vectors.
 - XKCP: the required portable SHAKE implementation from
   https://github.com/XKCP/XKCP at
-  `4affab454735d54e78156880b3b44e38dcbf765c` (individual notices and license included).
+  `d789b57c26dd7d5f628f7527c2bd006bc33b6a93` (individual notices and license included).
   `cmake/include/config.h` selects the portable Keccak configuration.
 - `src/native`: XMSS, HM field arithmetic and entropy acquisition adapted
-  from this repository's KKW implementation; application hashes and keyed
+  from the KKW implementation that this repository contained up to commit
+  `481accf8a01316cfba3f1e04536e8d3cb41d0f3b`; application hashes and keyed
   expansion are replaced with separate SHAKE256 domains.
 
 PoMFRIT: Baum, Beckmann, Beullens, Mukherjee and Rechberger,

@@ -5,7 +5,7 @@
 
 use std::{borrow::BorrowMut, marker::PhantomData, sync::Arc};
 
-use binius_compute::{Allocator, BufferPool, GlobalAllocator};
+use binius_alloc::{Allocator, BufferPool, GlobalAllocator};
 use binius_core::{
     constraint_system::{InoutSegment, ValueVec},
     word::Word,
