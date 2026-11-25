@@ -16,7 +16,7 @@ jobs:
   test:
     name: test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 20
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
@@ -55,5 +55,13 @@ jobs:
       - name: Build
         run: cmake --build build --parallel 4
 
+      # The x86 runner signs with portable Keccak, so the full SLH-DSA test
+      # (label slow) runs on the ARM macOS runner only.
       - name: Test
-        run: ctest --test-dir build --output-on-failure
+        shell: bash
+        run: |
+          if [[ "$RUNNER_OS" == "Linux" ]]; then
+            ctest --test-dir build --output-on-failure -LE slow
+          else
+            ctest --test-dir build --output-on-failure
+          fi

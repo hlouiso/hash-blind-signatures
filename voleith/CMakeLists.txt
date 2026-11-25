@@ -169,9 +169,12 @@ if(BUILD_TESTING)
     SLH_TEST_VECTOR_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../test-vectors/slh")
   voleith_apply_project_options(slh_test)
   add_test(NAME slh_quick COMMAND slh_test --quick)
+  # The full run generates SLH-DSA-SHAKE-128-24 keys (2^22 leaves) several
+  # times: minutes with the ARM SHA3 signer, far longer on portable Keccak.
+  # `ctest -LE slow` skips it.
   add_test(NAME slh COMMAND slh_test)
   set_tests_properties(slh_quick PROPERTIES TIMEOUT 1200)
-  set_tests_properties(slh PROPERTIES TIMEOUT 3600)
+  set_tests_properties(slh PROPERTIES TIMEOUT 3600 LABELS slow)
 
   find_package(Python3 COMPONENTS Interpreter REQUIRED)
   add_test(NAME cli COMMAND ${Python3_EXECUTABLE}
