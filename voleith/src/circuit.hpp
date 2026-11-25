@@ -45,6 +45,12 @@ struct NativeContext {
     witness.resize(kPrimaryBytes);
   }
 
+  // For a circuit with another primary witness size (slh_circuit.hpp).
+  NativeContext(Bytes primary, bool validate, size_t primary_bytes)
+      : witness(std::move(primary)), cursor(primary_bytes * 8), check(validate) {
+    witness.resize(primary_bytes);
+  }
+
   Bit constant(unsigned b) const { return b & 1; }
 
   Bit bit(size_t i) const { return (witness.at(i / 8) >> (i % 8)) & 1; }
@@ -127,6 +133,8 @@ struct AuthContext {
   size_t cursor = kPrimaryBytes * 8, constraints = 0, permutations = 0;
 
   explicit AuthContext(QS& q) : qs(q) {}
+  // For a circuit with another primary witness size (slh_circuit.hpp).
+  AuthContext(QS& q, size_t primary_bytes) : qs(q), cursor(primary_bytes * 8) {}
 
   Bit constant(unsigned b) const { return Bit(poly1::load(b, 0), &qs); }
 

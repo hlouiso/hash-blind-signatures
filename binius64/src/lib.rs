@@ -13,6 +13,7 @@ pub mod setup_multi;
 pub mod protocol;
 pub mod protocol_multi;
 pub mod serialize;
+pub mod slh;
 
 pub use setup::{
     BlindZkProver, BlindZkVerifier, ProverSetup, build_prover_setup, build_prover_setup_rate,

@@ -5,6 +5,23 @@ import sys
 import tempfile
 
 binary = str(pathlib.Path(sys.argv[1]).resolve())
+
+
+def cache_is_rebuilt(directory, run):
+    """A missing or corrupted signer_cache.bin only costs time."""
+    cache_file = directory / "signer_cache.bin"
+    cache = cache_file.read_bytes()
+    bad = bytearray(cache)
+    bad[len(bad) // 2] ^= 1
+    cache_file.write_bytes(bytes(bad))
+    assert "rebuilt" in run("sign").stdout
+    assert cache_file.read_bytes() == cache, "the rebuilt cache is the original"
+    run("prove")
+    cache_file.unlink()
+    assert "rebuilt" in run("sign").stdout
+    assert cache_file.read_bytes() == cache
+    assert "from signer_cache.bin" in run("sign").stdout
+    run("prove")
 with tempfile.TemporaryDirectory(prefix="voleith-cli-") as tmp:
     directory = pathlib.Path(tmp)
     message = directory / "message"
@@ -17,10 +34,11 @@ with tempfile.TemporaryDirectory(prefix="voleith-cli-") as tmp:
 
     run("keygen", "--height", 2)
     original = (directory / "signer_key.bin").read_bytes()
+    assert (directory / "signer_cache.bin").exists()
     run("keygen", "--height", 2, ok=False)
     assert (directory / "signer_key.bin").read_bytes() == original
     run("commit", message)
-    run("sign")
+    assert "from signer_cache.bin" in run("sign").stdout
     run("prove")
     run("verify", message)
     message.write_bytes(b"different")
@@ -37,4 +55,60 @@ with tempfile.TemporaryDirectory(prefix="voleith-cli-") as tmp:
     run("sign", ok=False)
     assert (directory / "xmss_sig.bin").read_bytes() == last
     run("params")
-print("CLI round trip, invalid message, atomic state and concurrent signing passed")
+    stateful_state = (directory / "user_state.bin").read_bytes()
+
+# Above the split height (8), sign rebuilds one 256-leaf subtree from the cache.
+with tempfile.TemporaryDirectory(prefix="voleith-cli-tall-") as tmp:
+    directory = pathlib.Path(tmp)
+    message = directory / "message"
+    message.write_bytes(b"a taller XMSS key")
+
+    def run(*args, ok=True):
+        result = subprocess.run([binary, *map(str, args), "-d", tmp], capture_output=True, text=True)
+        assert (result.returncode == 0) == ok, result.stdout + result.stderr
+        return result
+
+    run("keygen", "--height", 12)
+    assert len((directory / "signer_cache.bin").read_bytes()) == 10 + 16 * 31 + 32
+    run("commit", message)
+    assert "from signer_cache.bin" in run("sign").stdout
+    run("prove")
+    assert "[PASS]" in run("verify", message).stdout
+    cache_is_rebuilt(directory, run)
+
+# Stateless keys (SLH-DSA-SHAKE-128-24): about a minute of signer work in all.
+with tempfile.TemporaryDirectory(prefix="voleith-cli-slh-") as tmp:
+    directory = pathlib.Path(tmp)
+    message = directory / "message"
+    message.write_bytes(b"stateless blind signature CLI integration test")
+
+    def run(*args, ok=True):
+        result = subprocess.run([binary, *map(str, args), "-d", tmp], capture_output=True, text=True)
+        assert (result.returncode == 0) == ok, result.stdout + result.stderr
+        return result
+
+    assert "mutually exclusive" in run("keygen", "--stateful", "--stateless", ok=False).stderr
+    assert "--height" in run("keygen", "--stateless", "--height", 3, ok=False).stderr
+    assert "run keygen first" in run("commit", message, ok=False).stderr
+    run("keygen", "--stateless")
+    key = (directory / "signer_key.bin").read_bytes()
+    assert key[:8] == b"HBVO001k"
+    run("keygen", "--stateless", ok=False)
+    assert "keygen options" in run("sign", "--stateless", ok=False).stderr
+    run("commit", message)
+    assert "from signer_cache.bin" in run("sign").stdout
+    first = (directory / "slh_sig.bin").read_bytes()
+    run("sign")
+    assert (directory / "signer_key.bin").read_bytes() == key, "a stateless key is never rewritten"
+    assert (directory / "slh_sig.bin").read_bytes() != first, "signatures are hedged"
+    assert not (directory / "xmss_sig.bin").exists()
+    run("prove")
+    assert "[PASS]" in run("verify", message).stdout
+    message.write_bytes(b"different")
+    run("verify", message, ok=False)
+    cache_is_rebuilt(directory, run)
+    # A state committed for the other scheme is refused with a clear error.
+    (directory / "user_state.bin").write_bytes(stateful_state)
+    assert "run commit again" in run("prove", ok=False).stderr
+print("CLI round trips in both schemes, invalid message, atomic state, concurrent "
+      "signing, tree caches and scheme checks passed")

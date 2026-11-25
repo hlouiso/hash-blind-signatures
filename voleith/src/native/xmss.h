@@ -122,6 +122,28 @@ xmss_keypair *xmss_keypair_new_split(const uint8_t sk_seed[32], const uint8_t pk
                                      int height, int subtree_h);
 void xmss_keypair_free(xmss_keypair *kp);
 
+/* Threads for key generation and subtree rebuilds: XMSS_THREADS if set,
+ * else the online processors. */
+size_t xmss_threads(void);
+
+/* The split height of a key whose top levels are stored between sessions:
+ * they hold at most 2^17 nodes, and each signature rebuilds one bottom
+ * subtree of 2^c leaves (c = 8 up to height 24). */
+int xmss_cache_split_height(int height);
+
+/* The levels subtree_h..height of the tree, from the bottom level up:
+ * xmss_keypair_top_nodes(kp) nodes of XMSS_NODE_BYTES each. */
+size_t xmss_keypair_top_nodes(const xmss_keypair *kp);
+int xmss_keypair_subtree_height(const xmss_keypair *kp);
+void xmss_keypair_export_top(const xmss_keypair *kp, uint8_t *out);
+
+/* Rebuilds a key from exported top levels without sweeping the leaves; NULL
+ * unless they fit (height, subtree_h) and form one Merkle tree. Signing still
+ * checks each rebuilt bottom subtree against them and returns 0 if they
+ * belong to another key. */
+xmss_keypair *xmss_keypair_from_top(const uint8_t sk_seed[32], const uint8_t pk_seed[XMSS_PK_SEED_BYTES],
+                                    int height, int subtree_h, const uint8_t *nodes, size_t len);
+
 void xmss_keypair_root(const xmss_keypair *kp, xmss_node root_out);
 
 int xmss_keypair_height(const xmss_keypair *kp);

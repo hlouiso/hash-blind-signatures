@@ -54,6 +54,12 @@ HmCommitment user_commit(const Field& F, Rng& rng, const Bytes& msg,
 std::optional<XmssSignature> signer_sign(SignerKey& key,
                                           const HmCommitment& com);
 
+// As signer_sign, with the key's tree already built (for instance resumed
+// from XmssKeyPair::from_top_levels). nullopt if the key is exhausted or kp
+// is not the tree of `key`; key.next_leaf advances only on success.
+std::optional<XmssSignature> signer_sign_with(XmssKeyPair& kp, SignerKey& key,
+                                              const HmCommitment& com);
+
 BlindSignature user_prove(const Field& F,
                            const proofs::Circuit<Field>& circuit,
                            const UserState& state,

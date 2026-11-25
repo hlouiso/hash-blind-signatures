@@ -24,6 +24,17 @@ constexpr size_t kXmssHDefault = 10;
 
 constexpr size_t kSubtreeH = 16;
 
+// The split height of a key whose top levels are stored between sessions:
+// they hold at most 2^17 nodes, and each signature rebuilds one bottom
+// subtree of 2^c leaves (c = 8 up to height 24).
+constexpr size_t cache_split_height(size_t height) {
+  return height <= 8 ? height : (height > 24 ? height - 16 : 8);
+}
+
+// Threads for key generation and subtree rebuilds: XMSS_THREADS if set,
+// else the hardware concurrency.
+size_t xmss_threads();
+
 constexpr size_t kSkSeedBytes = 32;
 
 using AuthPath = std::array<Node, kXmssH>;
@@ -98,12 +109,26 @@ class XmssKeyPair {
                                               const PkSeed& pk_seed,
                                               size_t height, size_t subtree_h);
 
+  // Rebuilds a key from top_levels() without sweeping the leaves; nullopt
+  // unless the levels fit (height, subtree_h) and form one Merkle tree. A
+  // signature still checks the bottom subtree it rebuilds against them, and
+  // sign() returns nullopt if they belong to another key.
+  static std::optional<XmssKeyPair> from_top_levels(
+      const uint8_t sk_seed[kSkSeedBytes], const PkSeed& pk_seed, size_t height,
+      size_t subtree_h, std::vector<std::vector<Node>> top);
+
+  // Levels subtree_height()..height() of the tree, from the bottom.
+  const std::vector<std::vector<Node>>& top_levels() const { return top_; }
+  size_t subtree_height() const { return subtree_h_; }
+
   std::vector<Node> wots_secret_key(uint32_t leaf_index) const;
 
  private:
-  AuthPath extract_auth_path(uint32_t leaf_index);
+  // nullopt if the rebuilt bottom subtree disagrees with top_.
+  std::optional<AuthPath> extract_auth_path(uint32_t leaf_index);
 
-  std::vector<std::vector<Node>> build_subtree(uint32_t s) const;
+  std::vector<std::vector<Node>> build_subtree(uint32_t s, size_t threads) const;
+  void finish_top(const uint8_t sk_seed[kSkSeedBytes]);
 
   PkSeed pk_seed_;
   Node root_;

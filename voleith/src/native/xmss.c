@@ -2,8 +2,11 @@
 #include "hash.h"
 #include "randombytes.h"
 
+#include <pthread.h>
+#include <stdatomic.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 static void put_epoch_be(uint8_t *buf, size_t *o, uint32_t epoch)
 {
@@ -184,24 +187,95 @@ static int xmss_alloc_levels(xmss_node *tree[], int levels)
     return 0;
 }
 
+size_t xmss_threads(void)
+{
+    static size_t n;
+    if (n == 0)
+    {
+        const char *s = getenv("XMSS_THREADS");
+        long v = s ? strtol(s, NULL, 10) : 0;
+        if (v <= 0)
+            v = sysconf(_SC_NPROCESSORS_ONLN);
+        n = v > 0 ? (size_t)v : 1;
+    }
+    return n;
+}
+
+typedef void (*xmss_job_fn)(void *ctx, size_t i);
+
+typedef struct
+{
+    xmss_job_fn fn;
+    void *ctx;
+    size_t n, chunk;
+    atomic_size_t next;
+} xmss_pool;
+
+static void *xmss_pool_worker(void *arg)
+{
+    xmss_pool *p = arg;
+    for (;;)
+    {
+        size_t first = atomic_fetch_add_explicit(&p->next, p->chunk, memory_order_relaxed);
+        if (first >= p->n)
+            return NULL;
+        size_t last = first + p->chunk < p->n ? first + p->chunk : p->n;
+        for (size_t i = first; i < last; i++)
+            p->fn(p->ctx, i);
+    }
+}
+
+/* fn(ctx, i) for i < n over up to `threads` threads. */
+static void xmss_parallel_for(size_t n, size_t threads, xmss_job_fn fn, void *ctx)
+{
+    if (threads > n)
+        threads = n;
+    if (threads <= 1)
+    {
+        for (size_t i = 0; i < n; i++)
+            fn(ctx, i);
+        return;
+    }
+    size_t chunk = n / threads / 16;
+    xmss_pool p = {fn, ctx, n, chunk < 1 ? 1 : (chunk > 64 ? 64 : chunk), 0};
+    pthread_t *th = malloc((threads - 1) * sizeof *th);
+    size_t started = 0;
+    if (th)
+        for (; started < threads - 1; started++)
+            if (pthread_create(&th[started], NULL, xmss_pool_worker, &p) != 0)
+                break;
+    xmss_pool_worker(&p);
+    for (size_t i = 0; i < started; i++)
+        pthread_join(th[i], NULL);
+    free(th);
+}
+
+typedef struct
+{
+    const uint8_t *sk_seed, *pk_seed;
+    uint64_t base_epoch;
+    xmss_node *leaves;
+} xmss_leaf_job;
+
+static void xmss_leaf(void *v, size_t j)
+{
+    const xmss_leaf_job *job = v;
+    uint32_t epoch = (uint32_t)(job->base_epoch + (uint64_t)j);
+    xmss_node sk[XMSS_WOTS_LEN];
+    xmss_node pk[XMSS_WOTS_LEN];
+    xmss_wots_gen_sk(job->sk_seed, epoch, sk);
+    xmss_wots_pk_from_sk(job->pk_seed, epoch, sk, pk);
+    xmss_hash_public_key(job->pk_seed, epoch, pk, job->leaves[j]);
+}
+
 static void xmss_build_subtree(const uint8_t sk_seed[32], const uint8_t pk_seed[XMSS_PK_SEED_BYTES],
-                               uint32_t s, int subtree_h, xmss_node *sub[])
+                               uint32_t s, int subtree_h, xmss_node *sub[], size_t threads)
 {
     size_t width = (size_t)1u << subtree_h;
     uint64_t base_epoch = (uint64_t)s << subtree_h;
 
-#ifdef _OPENMP
-#pragma omp parallel for schedule(static)
-#endif
-    for (long long j = 0; j < (long long)width; j++)
-    {
-        uint32_t epoch = (uint32_t)(base_epoch + (uint64_t)j);
-        xmss_node sk[XMSS_WOTS_LEN];
-        xmss_node pk[XMSS_WOTS_LEN];
-        xmss_wots_gen_sk(sk_seed, epoch, sk);
-        xmss_wots_pk_from_sk(pk_seed, epoch, sk, pk);
-        xmss_hash_public_key(pk_seed, epoch, pk, sub[0][j]);
-    }
+    xmss_leaf_job job = {sk_seed, pk_seed, base_epoch, sub[0]};
+    xmss_parallel_for(width, threads, xmss_leaf, &job);
 
     for (int h = 1; h <= subtree_h; h++)
     {
@@ -270,6 +344,61 @@ struct xmss_keypair
 
 #define XMSS_NO_SUBTREE UINT64_MAX
 
+int xmss_cache_split_height(int height)
+{
+    return height <= 8 ? height : (height > 24 ? height - 16 : 8);
+}
+
+typedef struct
+{
+    const xmss_keypair *kp;
+    atomic_int failed;
+} xmss_root_job;
+
+/* top[0][s], the root of bottom subtree s, with scratch levels of its own. */
+static void xmss_subtree_root(void *v, size_t s)
+{
+    xmss_root_job *job = v;
+    const xmss_keypair *kp = job->kp;
+    xmss_node *sub[XMSS_H + 1];
+    if (xmss_alloc_levels(sub, kp->subtree_h) != 0)
+    {
+        atomic_store(&job->failed, 1);
+        return;
+    }
+    xmss_build_subtree(kp->sk_seed, kp->pk_seed, (uint32_t)s, kp->subtree_h, sub, 1);
+    memcpy(kp->top[0][s], sub[kp->subtree_h][0], XMSS_NODE_BYTES);
+    xmss_free_levels(sub, kp->subtree_h);
+}
+
+/* Allocates the levels of a key with the given shape; NULL on bad input. */
+static xmss_keypair *xmss_keypair_alloc(const uint8_t sk_seed[32], const uint8_t pk_seed[XMSS_PK_SEED_BYTES],
+                                        int height, int subtree_h)
+{
+    if (height < 1 || height > XMSS_H || subtree_h < 1 || subtree_h > height)
+        return NULL;
+    xmss_keypair *kp = malloc(sizeof *kp);
+    if (!kp)
+        return NULL;
+    memcpy(kp->sk_seed, sk_seed, sizeof kp->sk_seed);
+    memcpy(kp->pk_seed, pk_seed, XMSS_PK_SEED_BYTES);
+    kp->height = height;
+    kp->subtree_h = subtree_h;
+    kp->cached_subtree = XMSS_NO_SUBTREE;
+    if (xmss_alloc_levels(kp->top, height - subtree_h) != 0)
+    {
+        free(kp);
+        return NULL;
+    }
+    if (xmss_alloc_levels(kp->bottom, subtree_h) != 0)
+    {
+        xmss_free_levels(kp->top, height - subtree_h);
+        free(kp);
+        return NULL;
+    }
+    return kp;
+}
+
 xmss_keypair *xmss_keypair_new(const uint8_t sk_seed[32], const uint8_t pk_seed[XMSS_PK_SEED_BYTES],
                                int height)
 {
@@ -280,42 +409,78 @@ xmss_keypair *xmss_keypair_new(const uint8_t sk_seed[32], const uint8_t pk_seed[
 xmss_keypair *xmss_keypair_new_split(const uint8_t sk_seed[32], const uint8_t pk_seed[XMSS_PK_SEED_BYTES],
                                      int height, int subtree_h)
 {
-    if (height < 1 || height > XMSS_H)
-        return NULL;
-    if (subtree_h < 1 || subtree_h > height)
-        return NULL;
-
-    xmss_keypair *kp = malloc(sizeof *kp);
+    xmss_keypair *kp = xmss_keypair_alloc(sk_seed, pk_seed, height, subtree_h);
     if (!kp)
         return NULL;
-    memcpy(kp->sk_seed, sk_seed, sizeof kp->sk_seed);
-    memcpy(kp->pk_seed, pk_seed, XMSS_PK_SEED_BYTES);
-    kp->height = height;
-    kp->subtree_h = subtree_h;
-    kp->cached_subtree = XMSS_NO_SUBTREE;
     const int top_h = height - kp->subtree_h;
 
-    if (xmss_alloc_levels(kp->top, top_h) != 0)
+    /* One subtree uses every thread; many subtrees take one thread each. */
+    if (top_h == 0)
     {
-        free(kp);
-        return NULL;
+        xmss_build_subtree(kp->sk_seed, kp->pk_seed, 0, kp->subtree_h, kp->bottom, xmss_threads());
+        memcpy(kp->top[0][0], kp->bottom[kp->subtree_h][0], XMSS_NODE_BYTES);
+        kp->cached_subtree = 0;
     }
-    if (xmss_alloc_levels(kp->bottom, kp->subtree_h) != 0)
+    else
     {
-        xmss_free_levels(kp->top, top_h);
-        free(kp);
-        return NULL;
+        xmss_root_job job = {kp, 0};
+        xmss_parallel_for((size_t)1u << top_h, xmss_threads(), xmss_subtree_root, &job);
+        if (atomic_load(&job.failed))
+        {
+            xmss_keypair_free(kp);
+            return NULL;
+        }
     }
-
-    for (uint64_t s = 0; s < (uint64_t)1u << top_h; s++)
-    {
-        xmss_build_subtree(kp->sk_seed, kp->pk_seed, (uint32_t)s, kp->subtree_h, kp->bottom);
-        memcpy(kp->top[0][s], kp->bottom[kp->subtree_h][0], XMSS_NODE_BYTES);
-    }
-
-    kp->cached_subtree = top_h == 0 ? 0 : ((uint64_t)1u << top_h) - 1;
 
     xmss_build_top(kp->pk_seed, kp->subtree_h, top_h, kp->top);
+    xmss_derive_upper_siblings(kp->sk_seed, XMSS_H - height, kp->upper);
+    xmss_climb_upper(kp->pk_seed, kp->top[top_h][0], height, kp->upper, kp->root);
+    return kp;
+}
+
+size_t xmss_keypair_top_nodes(const xmss_keypair *kp)
+{
+    return ((size_t)2u << (kp->height - kp->subtree_h)) - 1;
+}
+
+int xmss_keypair_subtree_height(const xmss_keypair *kp) { return kp->subtree_h; }
+
+void xmss_keypair_export_top(const xmss_keypair *kp, uint8_t *out)
+{
+    const int top_h = kp->height - kp->subtree_h;
+    for (int r = 0; r <= top_h; r++)
+    {
+        size_t bytes = ((size_t)1u << (top_h - r)) * XMSS_NODE_BYTES;
+        memcpy(out, kp->top[r], bytes);
+        out += bytes;
+    }
+}
+
+xmss_keypair *xmss_keypair_from_top(const uint8_t sk_seed[32], const uint8_t pk_seed[XMSS_PK_SEED_BYTES],
+                                    int height, int subtree_h, const uint8_t *nodes, size_t len)
+{
+    xmss_keypair *kp = xmss_keypair_alloc(sk_seed, pk_seed, height, subtree_h);
+    if (!kp)
+        return NULL;
+    const int top_h = height - subtree_h;
+    if (len != xmss_keypair_top_nodes(kp) * XMSS_NODE_BYTES)
+    {
+        xmss_keypair_free(kp);
+        return NULL;
+    }
+    memcpy(kp->top[0], nodes, ((size_t)1u << top_h) * XMSS_NODE_BYTES);
+    xmss_build_top(kp->pk_seed, subtree_h, top_h, kp->top);
+    const uint8_t *p = nodes;
+    for (int r = 0; r <= top_h; r++)
+    {
+        size_t bytes = ((size_t)1u << (top_h - r)) * XMSS_NODE_BYTES;
+        if (memcmp(kp->top[r], p, bytes) != 0)
+        {
+            xmss_keypair_free(kp);
+            return NULL;
+        }
+        p += bytes;
+    }
     xmss_derive_upper_siblings(kp->sk_seed, XMSS_H - height, kp->upper);
     xmss_climb_upper(kp->pk_seed, kp->top[top_h][0], height, kp->upper, kp->root);
     return kp;
@@ -418,7 +583,13 @@ int xmss_keypair_sign(xmss_keypair *kp, uint32_t leaf_index, const uint8_t *mess
     const uint64_t s = (uint64_t)leaf_index >> kp->subtree_h;
     if (kp->cached_subtree != s)
     {
-        xmss_build_subtree(kp->sk_seed, kp->pk_seed, (uint32_t)s, kp->subtree_h, kp->bottom);
+        xmss_build_subtree(kp->sk_seed, kp->pk_seed, (uint32_t)s, kp->subtree_h, kp->bottom, xmss_threads());
+        /* Stored top levels of another key fail here. */
+        if (memcmp(kp->bottom[kp->subtree_h][0], kp->top[0][s], XMSS_NODE_BYTES) != 0)
+        {
+            kp->cached_subtree = XMSS_NO_SUBTREE;
+            return 0;
+        }
         kp->cached_subtree = s;
     }
 

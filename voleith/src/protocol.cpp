@@ -54,6 +54,45 @@ Signer::Signer(SecretKey key) : key_(key), tree_(nullptr, xmss_keypair_free) {
   if (!tree_) throw std::runtime_error("XMSS tree generation failed");
 }
 
+Signer::Signer(SecretKey key, int subtree_h)
+    : key_(key), tree_(nullptr, xmss_keypair_free) {
+  validate_key(key_);
+  tree_.reset(xmss_keypair_new_split(key_.seed.data(), key_.public_seed.data(),
+                                     key_.height, subtree_h));
+  if (!tree_) throw std::runtime_error("XMSS tree generation failed");
+}
+
+Signer::Signer(SecretKey key, xmss_keypair* tree)
+    : key_(key), tree_(tree, xmss_keypair_free) {}
+
+Signer Signer::generate_cached(int height) {
+  if (height < 1 || height > 32)
+    throw std::invalid_argument("XMSS height must be in [1,32]");
+  SecretKey k{};
+  k.height = height;
+  random(k.seed);
+  random(k.public_seed);
+  return Signer(k, xmss_cache_split_height(height));
+}
+
+std::optional<Signer> Signer::from_cache(SecretKey key, int subtree_h,
+                                         std::span<const uint8_t> nodes) {
+  validate_key(key);
+  xmss_keypair* tree =
+      xmss_keypair_from_top(key.seed.data(), key.public_seed.data(), key.height,
+                            subtree_h, nodes.data(), nodes.size());
+  if (!tree) return std::nullopt;
+  return Signer(key, tree);
+}
+
+Bytes Signer::top_cache() const {
+  Bytes out(xmss_keypair_top_nodes(tree_.get()) * XMSS_NODE_BYTES);
+  xmss_keypair_export_top(tree_.get(), out.data());
+  return out;
+}
+
+int Signer::subtree_height() const { return xmss_keypair_subtree_height(tree_.get()); }
+
 Signer Signer::generate(int height) {
   if (height < 1 || height > 32)
     throw std::invalid_argument("XMSS height must be in [1,32]");

@@ -24,6 +24,13 @@ pub const XMSS_H: usize = 10;
 
 pub const SUBTREE_H: usize = 16;
 
+/// The split height of a key whose top levels are stored between sessions:
+/// they hold at most 2^17 nodes, and each signature rebuilds one bottom
+/// subtree of 2^c leaves (c = 8 up to height 24).
+pub fn cache_split_height(height: usize) -> usize {
+    if height <= 8 { height } else { height.saturating_sub(16).max(8) }
+}
+
 const UPPER_SIBLING_DOMAIN: &[u8] = b"blind-xmss-binius64/upper-siblings";
 
 fn build_subtree(
@@ -103,12 +110,16 @@ impl std::error::Error for KeyExhaustedError {}
 #[derive(Debug)]
 pub enum XmssSignError {
     KeyExhausted(KeyExhaustedError),
+    /// A rebuilt bottom subtree disagrees with the stored top levels, which
+    /// therefore belong to another key.
+    TreeMismatch,
 }
 
 impl core::fmt::Display for XmssSignError {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             Self::KeyExhausted(e) => e.fmt(f),
+            Self::TreeMismatch => write!(f, "the stored XMSS top levels do not belong to this key"),
         }
     }
 }
@@ -117,6 +128,7 @@ impl std::error::Error for XmssSignError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::KeyExhausted(e) => Some(e),
+            Self::TreeMismatch => None,
         }
     }
 }
@@ -299,6 +311,54 @@ impl XmssKeyPair {
         }
     }
 
+    /// Rebuilds a key from the top levels of `top_levels`, without sweeping
+    /// the leaves. None if their shape does not fit `height` and `subtree_h`
+    /// or they are not one Merkle tree; a signature still checks the bottom
+    /// subtree it rebuilds against them.
+    pub fn from_top_levels(
+        sk_seed: &[u8; SK_SEED_BYTES],
+        pk_seed: &[u8; PK_SEED_BYTES],
+        height: usize,
+        subtree_h: usize,
+        top: Vec<Vec<Digest>>,
+    ) -> Option<Self> {
+        if !(1..=LOG_LIFETIME).contains(&height) || !(1..=height).contains(&subtree_h) {
+            return None;
+        }
+        let top_h = height - subtree_h;
+        let shaped = top.len() == top_h + 1
+            && top.iter().enumerate().all(|(r, level)| level.len() == 1 << (top_h - r));
+        if !shaped {
+            return None;
+        }
+        let param = build_wots_domain_param(pk_seed);
+        if build_top(&param, top[0].clone(), subtree_h, top_h) != top {
+            return None;
+        }
+        let upper = derive_upper_siblings(sk_seed, LOG_LIFETIME - height);
+        let root = climb_upper(&param, &top[top_h][0], &upper, height);
+        Some(Self {
+            pk_seed: *pk_seed,
+            root,
+            sk_seed: *sk_seed,
+            height,
+            subtree_h,
+            top,
+            bottom: None,
+            upper,
+            next_leaf: 0,
+        })
+    }
+
+    /// Levels subtree_h..=height of the tree, the part `from_top_levels` takes.
+    pub fn top_levels(&self) -> &[Vec<Digest>] {
+        &self.top
+    }
+
+    pub fn subtree_height(&self) -> usize {
+        self.subtree_h
+    }
+
     pub fn height(&self) -> usize {
         self.height
     }
@@ -326,7 +386,7 @@ impl XmssKeyPair {
 
         let sk = derive_wots_secret_key(&self.sk_seed, epoch);
         let chain_tips = compute_wots_signature(&param, epoch, &sk, &encoding);
-        let merkle_path = self.merkle_path(epoch);
+        let merkle_path = self.merkle_path(epoch).ok_or(XmssSignError::TreeMismatch)?;
 
         let sig = XmssSignature {
             epoch,
@@ -344,11 +404,14 @@ impl XmssKeyPair {
         Ok(sig)
     }
 
-    fn merkle_path(&mut self, epoch: u32) -> [Digest; LOG_LIFETIME] {
+    fn merkle_path(&mut self, epoch: u32) -> Option<[Digest; LOG_LIFETIME]> {
         let s = (epoch as u64 >> self.subtree_h) as u32;
         if self.bottom.as_ref().map(|(cached, _)| *cached) != Some(s) {
             let param = build_wots_domain_param(&self.pk_seed);
             let built = build_subtree(&self.sk_seed, &param, s, self.subtree_h);
+            if built[self.subtree_h][0] != self.top[0][s as usize] {
+                return None;
+            }
             self.bottom = Some((s, built));
         }
         let bottom = &self.bottom.as_ref().expect("just populated").1;
@@ -366,7 +429,7 @@ impl XmssKeyPair {
             idx >>= 1;
         }
         path[self.height..].copy_from_slice(&self.upper);
-        path
+        Some(path)
     }
 
     pub fn public_key(&self) -> Digest {
@@ -526,7 +589,7 @@ mod tests {
             );
 
             for epoch in 0..1u32 << height {
-                let path = kp.merkle_path(epoch);
+                let path = kp.merkle_path(epoch).unwrap();
                 let mut idx = epoch as usize;
                 for h in 0..height {
                     assert_eq!(
@@ -544,6 +607,41 @@ mod tests {
                     "{label}: climb"
                 );
             }
+        }
+    }
+
+    #[test]
+    fn a_key_resumed_from_its_top_levels_signs_identically() {
+        let mut rng = StdRng::seed_from_u64(0x70_9c);
+        for (height, split) in [(1, 1), (5, 2), (8, 8), (9, 3), (10, 8), (12, 8)] {
+            let mut sk_seed = [0u8; SK_SEED_BYTES];
+            let mut pk_seed = [0u8; PK_SEED_BYTES];
+            rng.fill_bytes(&mut sk_seed);
+            rng.fill_bytes(&mut pk_seed);
+            let mut full =
+                XmssKeyPair::generate_from_seed_with_subtree_h(&sk_seed, &pk_seed, height, split);
+            let top = full.top_levels().to_vec();
+            let mut resumed =
+                XmssKeyPair::from_top_levels(&sk_seed, &pk_seed, height, split, top.clone())
+                    .unwrap();
+            assert_eq!(resumed.public_key(), full.public_key(), "h={height} split={split}");
+            for epoch in (0..1u32 << height).step_by(1 + (1 << height) / 64) {
+                assert_eq!(resumed.merkle_path(epoch), full.merkle_path(epoch));
+            }
+
+            // Shapes and internal consistency are checked on load.
+            assert!(XmssKeyPair::from_top_levels(&sk_seed, &pk_seed, height, split, top[1..].to_vec()).is_none());
+            if height > split {
+                let mut bad = top.clone();
+                bad[1][0][0] ^= 1;
+                assert!(XmssKeyPair::from_top_levels(&sk_seed, &pk_seed, height, split, bad).is_none());
+            }
+            // A consistent tree of another key fails when signing.
+            let mut other_seed = sk_seed;
+            other_seed[0] ^= 1;
+            let mut foreign =
+                XmssKeyPair::from_top_levels(&other_seed, &pk_seed, height, split, top).unwrap();
+            assert!(foreign.sign(&mut rng, &message(3)).is_err(), "h={height}");
         }
     }
 

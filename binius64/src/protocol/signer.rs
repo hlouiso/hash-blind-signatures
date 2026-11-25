@@ -32,7 +32,46 @@ impl Signer {
         next_leaf: u64,
         height: usize,
     ) -> Self {
-        let mut kp = XmssKeyPair::generate_from_seed(sk_seed, pk_seed, height);
+        let kp = XmssKeyPair::generate_from_seed(sk_seed, pk_seed, height);
+        Self::with_keypair(kp, sk_seed, next_leaf)
+    }
+
+    /// As `from_key`, splitting the tree at `subtree_h`; see `top_levels`.
+    pub fn from_key_split(
+        sk_seed: &[u8; SK_SEED_BYTES],
+        pk_seed: &[u8; PK_SEED_BYTES],
+        next_leaf: u64,
+        height: usize,
+        subtree_h: usize,
+    ) -> Self {
+        let kp =
+            XmssKeyPair::generate_from_seed_with_subtree_h(sk_seed, pk_seed, height, subtree_h);
+        Self::with_keypair(kp, sk_seed, next_leaf)
+    }
+
+    /// Resumes a signer from stored top levels, without the keygen sweep.
+    pub fn from_top_levels(
+        sk_seed: &[u8; SK_SEED_BYTES],
+        pk_seed: &[u8; PK_SEED_BYTES],
+        next_leaf: u64,
+        height: usize,
+        subtree_h: usize,
+        top: Vec<Vec<Digest>>,
+    ) -> Option<Self> {
+        let kp = XmssKeyPair::from_top_levels(sk_seed, pk_seed, height, subtree_h, top)?;
+        Some(Self::with_keypair(kp, sk_seed, next_leaf))
+    }
+
+    /// The levels above the split, which `from_top_levels` takes back.
+    pub fn top_levels(&self) -> &[Vec<Digest>] {
+        self.kp.top_levels()
+    }
+
+    pub fn subtree_height(&self) -> usize {
+        self.kp.subtree_height()
+    }
+
+    fn with_keypair(mut kp: XmssKeyPair, sk_seed: &[u8; SK_SEED_BYTES], next_leaf: u64) -> Self {
         kp.set_next_leaf(next_leaf);
 
         let mut hasher = blake3::Hasher::new_keyed(sk_seed);

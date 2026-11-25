@@ -102,11 +102,17 @@ pub struct BlindCommitGadget {
     pub domain_param: [Wire; DOMAIN_PARAM_WIRES],
     pub reveal_r: Blake3RevealR,
     com_d: [Wire; 4],
+    d_digest: [Wire; 8],
 }
 
 impl BlindCommitGadget {
     pub fn com_d(&self) -> &[Wire; 4] {
         &self.com_d
+    }
+
+    /// The digest d as the eight little-endian 32-bit BLAKE3 output words.
+    pub fn d_digest_words(&self) -> &[Wire; 8] {
+        &self.d_digest
     }
 
     pub fn new(b: &CircuitBuilder) -> Self {
@@ -151,6 +157,7 @@ impl BlindCommitGadget {
             domain_param,
             reveal_r,
             com_d,
+            d_digest,
         }
     }
 

@@ -101,7 +101,9 @@ endif()
 add_library(voleith_native STATIC src/native/hash.c src/native/xmss.c
   src/native/commitment.c src/native/gf128.c src/native/randombytes.c)
 target_include_directories(voleith_native PUBLIC src)
-target_link_libraries(voleith_native PUBLIC xkcp)
+# xmss.c generates keys on a pthread pool.
+find_package(Threads REQUIRED)
+target_link_libraries(voleith_native PUBLIC xkcp Threads::Threads)
 target_compile_definitions(voleith_native PUBLIC
   VOLEITH_TAU=${VOLEITH_TAU}
   VOLEITH_DEGREE=${VOLEITH_DEGREE}
@@ -114,12 +116,37 @@ target_link_libraries(blindsig PRIVATE voleith)
 add_executable(bench src/bench.cpp)
 target_link_libraries(bench PRIVATE voleith)
 
+# SLH-DSA-SHAKE as the underlying signature (slh_circuit.hpp).
+find_package(Threads REQUIRED)
+add_library(voleith_slh_native STATIC src/native/slh.c src/native/slh_commit.c)
+target_link_libraries(voleith_slh_native PUBLIC voleith_native Threads::Threads)
+# Only the XKCP assembly uses SHA3 instructions. slh.c dispatches at runtime.
+option(VOLEITH_SLH_ARM_SHA3 "Enable the ARM SHA3 two-state signer when supported" ON)
+if(VOLEITH_SLH_ARM_SHA3 AND VOLEITH_ARCH MATCHES "arm64|aarch64" AND NOT CMAKE_OSX_ARCHITECTURES MATCHES ";")
+  enable_language(ASM)
+  set(slh_x2_dir "${X}/lib/low/KeccakP-1600-times2/ARMv8A")
+  set(slh_x2_sources
+    "${slh_x2_dir}/KeccakP-1600-inplace-pl2-armv8a-neon.s"
+    "${slh_x2_dir}/KeccakP-1600-times2-x2-v84a-asm.s")
+  set_source_files_properties(${slh_x2_sources} PROPERTIES
+    COMPILE_OPTIONS "-x;assembler-with-cpp;-march=armv8.2-a+sha3")
+  target_sources(voleith_slh_native PRIVATE ${slh_x2_sources})
+  target_include_directories(voleith_slh_native SYSTEM PRIVATE "${slh_x2_dir}")
+  target_compile_definitions(voleith_slh_native PRIVATE SLH_ARM_SHA3_X2)
+endif()
+add_library(voleith_slh STATIC src/slh_proof.cpp src/slh_protocol.cpp)
+target_link_libraries(voleith_slh PUBLIC voleith voleith_slh_native)
+# blindsig --stateless and bench --stateless run the SLH-DSA protocol as well.
+target_link_libraries(blindsig PRIVATE voleith_slh)
+target_link_libraries(bench PRIVATE voleith_slh)
+
 function(voleith_apply_project_options target)
   target_compile_options(${target} PRIVATE
     $<$<COMPILE_LANG_AND_ID:C,GNU,Clang,AppleClang>:-Wall;-Wextra;-Werror>
     $<$<COMPILE_LANG_AND_ID:CXX,GNU,Clang,AppleClang>:-Wall;-Wextra;-Werror>)
 endfunction()
-foreach(target voleith_native voleith blindsig bench)
+foreach(target voleith_native voleith blindsig bench
+        voleith_slh_native voleith_slh)
   voleith_apply_project_options(${target})
 endforeach()
 
@@ -135,6 +162,16 @@ if(BUILD_TESTING)
   target_link_libraries(protocol_test PRIVATE voleith)
   voleith_apply_project_options(protocol_test)
   add_test(NAME protocol COMMAND protocol_test)
+
+  add_executable(slh_test tests/slh_test.cpp)
+  target_link_libraries(slh_test PRIVATE voleith_slh)
+  target_compile_definitions(slh_test PRIVATE
+    SLH_TEST_VECTOR_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../test-vectors/slh")
+  voleith_apply_project_options(slh_test)
+  add_test(NAME slh_quick COMMAND slh_test --quick)
+  add_test(NAME slh COMMAND slh_test)
+  set_tests_properties(slh_quick PROPERTIES TIMEOUT 1200)
+  set_tests_properties(slh PROPERTIES TIMEOUT 3600)
 
   find_package(Python3 COMPONENTS Interpreter REQUIRED)
   add_test(NAME cli COMMAND ${Python3_EXECUTABLE}

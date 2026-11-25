@@ -27,17 +27,32 @@ Hash sha256(const uint8_t* data, size_t n) {
   return out;
 }
 
+// RFC 2104 over proofs::SHA256. OpenSSL 3's one-shot HMAC() fetches the
+// algorithm under a global lock on every call, which serialized the
+// multi-threaded XMSS key generation (43 HMACs per leaf).
 Hash hmac_sha256(const uint8_t* key, size_t key_len, const uint8_t* data,
                  size_t data_len) {
-  proofs::check(key_len <= static_cast<size_t>(std::numeric_limits<int>::max()),
-                "HMAC-SHA-256 key too long");
+  constexpr size_t kBlock = 64;
+  uint8_t k[kBlock] = {};
+  if (key_len > kBlock) {
+    const Hash kh = sha256(key, key_len);
+    std::memcpy(k, kh.data(), kh.size());
+  } else if (key_len != 0) {
+    std::memcpy(k, key, key_len);
+  }
+  uint8_t pad[kBlock];
+  for (size_t i = 0; i < kBlock; ++i) pad[i] = k[i] ^ 0x36;
+  proofs::SHA256 inner;
+  inner.Update(pad, kBlock);
+  inner.Update(data, data_len);
+  Hash ih;
+  inner.DigestData(ih.data());
+  for (size_t i = 0; i < kBlock; ++i) pad[i] = k[i] ^ 0x5c;
+  proofs::SHA256 outer;
+  outer.Update(pad, kBlock);
+  outer.Update(ih.data(), ih.size());
   Hash out;
-  unsigned int out_len = 0;
-  const unsigned char* result =
-      HMAC(EVP_sha256(), key, static_cast<int>(key_len), data, data_len,
-           out.data(), &out_len);
-  proofs::check(result == out.data() && out_len == out.size(),
-                "HMAC-SHA-256 failed");
+  outer.DigestData(out.data());
   return out;
 }
 

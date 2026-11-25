@@ -1,3 +1,5 @@
+#include <openssl/evp.h>
+#include <openssl/hmac.h>
 #include <algorithm>
 #include <cstdio>
 #include <cstring>
@@ -121,6 +123,23 @@ void test_sha_and_codeword(Tally& t) {
     t.record("HMAC-SHA-256 matches RFC 4231 test vector",
              hmac_sha256(key.data(), key.size(), kData,
                          sizeof(kData) - 1) == kExpected);
+  }
+
+  {
+    // hmac_sha256 is RFC 2104 on proofs::SHA256; OpenSSL's HMAC is the reference.
+    bool same = true;
+    std::vector<uint8_t> buf(300);
+    for (size_t i = 0; i < buf.size(); ++i) buf[i] = static_cast<uint8_t>(i * 131 + 7);
+    for (size_t key_len : {0, 1, 16, 32, 63, 64, 65, 100, 200})
+      for (size_t data_len : {0, 1, 55, 56, 64, 119, 300 - 64}) {
+        Hash ref;
+        unsigned int n = 0;
+        HMAC(EVP_sha256(), buf.data() + 64, static_cast<int>(key_len), buf.data(),
+             data_len, ref.data(), &n);
+        same = same && n == ref.size() &&
+               hmac_sha256(buf.data() + 64, key_len, buf.data(), data_len) == ref;
+      }
+    t.record("HMAC-SHA-256 matches OpenSSL for keys of 0 to 200 bytes", same);
   }
 
   const PkSeed pk_seed = [] { PkSeed h; h.fill(0x33); return h; }();

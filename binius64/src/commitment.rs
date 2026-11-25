@@ -113,7 +113,18 @@ pub fn hm_commit(
     a: &[[GhashElement; N_NONCE]; N_LINES],
     r: &[GhashElement; N_NONCE],
 ) -> HmCommitment {
-    let m_hat = encode_message(msg);
+    hm_commit_digest(&blake3_256(msg), a, r, hash_r(r))
+}
+
+/// The commitment to a message digest `m_hat`, with `y` the hash of `r`, for
+/// whichever hash function computes both.
+pub fn hm_commit_digest(
+    m_hat: &[u8; N_Y],
+    a: &[[GhashElement; N_NONCE]; N_LINES],
+    r: &[GhashElement; N_NONCE],
+    y: [u8; N_Y],
+) -> HmCommitment {
+    let m_hat = encode_digest(m_hat);
     let mut b = [[0u8; N_FE]; N_LINES];
 
     for k in 0..N_LINES {
@@ -124,11 +135,7 @@ pub fn hm_commit(
         b[k] = field_to_bytes(field_from_bytes(&m_hat[k]) + sum);
     }
 
-    HmCommitment {
-        a: *a,
-        b,
-        y: hash_r(r),
-    }
+    HmCommitment { a: *a, b, y }
 }
 
 pub fn sample_commitment(

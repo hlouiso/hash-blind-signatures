@@ -3,7 +3,10 @@
 #include <algorithm>
 
 #include <array>
+#include <atomic>
+#include <cstdlib>
 #include <cstring>
+#include <thread>
 
 #include "rng.h"
 #include "util/panic.h"
@@ -22,6 +25,27 @@ void put_u32le(uint8_t* out, uint32_t v) {
   out[1] = static_cast<uint8_t>(v >> 8);
   out[2] = static_cast<uint8_t>(v >> 16);
   out[3] = static_cast<uint8_t>(v >> 24);
+}
+
+// fn(i) for i < n over `threads` threads, which claim items in small chunks.
+template <class Fn>
+void parallel_for(size_t n, size_t threads, const Fn& fn) {
+  threads = std::min(threads, n);
+  if (threads <= 1) {
+    for (size_t i = 0; i < n; ++i) fn(i);
+    return;
+  }
+  const size_t chunk = std::clamp<size_t>(n / threads / 16, 1, 64);
+  std::atomic<size_t> next{0};
+  auto worker = [&] {
+    for (size_t first; (first = next.fetch_add(chunk, std::memory_order_relaxed)) < n;)
+      for (size_t i = first; i < std::min(first + chunk, n); ++i) fn(i);
+  };
+  std::vector<std::thread> pool;
+  pool.reserve(threads - 1);
+  for (size_t t = 1; t < threads; ++t) pool.emplace_back(worker);
+  worker();
+  for (auto& th : pool) th.join();
 }
 
 Hash derive_wots_prf_key(const uint8_t sk_seed[kSkSeedBytes]) {
@@ -196,19 +220,31 @@ std::vector<Node> XmssKeyPair::wots_secret_key(uint32_t leaf_index) const {
   return sk;
 }
 
-std::vector<std::vector<Node>> XmssKeyPair::build_subtree(uint32_t s) const {
+size_t xmss_threads() {
+  static const size_t n = [] {
+    if (const char* s = std::getenv("XMSS_THREADS")) {
+      const long v = std::strtol(s, nullptr, 10);
+      if (v > 0) return static_cast<size_t>(v);
+    }
+    const unsigned hw = std::thread::hardware_concurrency();
+    return static_cast<size_t>(hw ? hw : 1);
+  }();
+  return n;
+}
+
+std::vector<std::vector<Node>> XmssKeyPair::build_subtree(uint32_t s,
+                                                          size_t threads) const {
   const Bytes param = build_wots_domain_param(pk_seed_);
   const size_t width = size_t{1} << subtree_h_;
   const uint64_t base_epoch = uint64_t{s} << subtree_h_;
 
-  std::vector<Node> leaves;
-  leaves.reserve(width);
-  for (size_t j = 0; j < width; ++j) {
+  std::vector<Node> leaves(width);
+  parallel_for(width, threads, [&](size_t j) {
     const uint32_t epoch = static_cast<uint32_t>(base_epoch + j);
     const std::vector<Node> sk = wots_secret_key(epoch);
     const std::vector<Node> pk = compute_wots_public_key(param, epoch, sk);
-    leaves.push_back(hash_public_key(param, epoch, pk));
-  }
+    leaves[j] = hash_public_key(param, epoch, pk);
+  });
 
   std::vector<std::vector<Node>> levels;
   levels.push_back(std::move(leaves));
@@ -244,37 +280,72 @@ XmssKeyPair XmssKeyPair::generate_from_seed_split(
   kp.height_ = height;
   kp.subtree_h_ = subtree_h;
 
-  std::vector<Node> subtree_roots;
-  subtree_roots.reserve(size_t{1} << top_h);
-  for (uint64_t s = 0; s < uint64_t{1} << top_h; ++s) {
-    kp.bottom_ = kp.build_subtree(static_cast<uint32_t>(s));
-    kp.cached_subtree_ = s;
-    subtree_roots.push_back(kp.bottom_[subtree_h][0]);
+  // One subtree uses every thread; many subtrees take one thread each.
+  std::vector<Node> subtree_roots(size_t{1} << top_h);
+  if (top_h == 0) {
+    kp.bottom_ = kp.build_subtree(0, xmss_threads());
+    kp.cached_subtree_ = 0;
+    subtree_roots[0] = kp.bottom_[subtree_h][0];
+  } else {
+    parallel_for(subtree_roots.size(), xmss_threads(), [&](size_t s) {
+      subtree_roots[s] = kp.build_subtree(static_cast<uint32_t>(s), 1)[subtree_h][0];
+    });
   }
 
   kp.top_.push_back(std::move(subtree_roots));
+  kp.finish_top(sk_seed);
+  return kp;
+}
+
+// Levels 1..top_h above top_[0], the upper siblings and the root.
+void XmssKeyPair::finish_top(const uint8_t sk_seed[kSkSeedBytes]) {
+  const Bytes param = build_wots_domain_param(pk_seed_);
+  const size_t top_h = height_ - subtree_h_;
+  top_.resize(1);
   for (size_t r = 1; r <= top_h; ++r) {
-    const std::vector<Node>& prev = kp.top_[r - 1];
+    const std::vector<Node>& prev = top_[r - 1];
     const size_t n = size_t{1} << (top_h - r);
     std::vector<Node> level;
     level.reserve(n);
     for (size_t i = 0; i < n; ++i) {
       level.push_back(hash_tree_node(param, prev[2 * i], prev[2 * i + 1],
-                                     static_cast<uint32_t>(subtree_h + r - 1),
+                                     static_cast<uint32_t>(subtree_h_ + r - 1),
                                      static_cast<uint32_t>(i)));
     }
-    kp.top_.push_back(std::move(level));
+    top_.push_back(std::move(level));
   }
 
-  kp.upper_ = derive_upper_siblings(sk_seed, kXmssH - height);
-  kp.root_ = climb_upper(param, kp.top_[top_h][0], height, kp.upper_);
+  upper_ = derive_upper_siblings(sk_seed, kXmssH - height_);
+  root_ = climb_upper(param, top_[top_h][0], height_, upper_);
+}
+
+std::optional<XmssKeyPair> XmssKeyPair::from_top_levels(
+    const uint8_t sk_seed[kSkSeedBytes], const PkSeed& pk_seed, size_t height,
+    size_t subtree_h, std::vector<std::vector<Node>> top) {
+  if (height < 1 || height > kXmssH || subtree_h < 1 || subtree_h > height)
+    return std::nullopt;
+  const size_t top_h = height - subtree_h;
+  if (top.size() != top_h + 1) return std::nullopt;
+  for (size_t r = 0; r <= top_h; ++r)
+    if (top[r].size() != size_t{1} << (top_h - r)) return std::nullopt;
+
+  XmssKeyPair kp;
+  kp.pk_seed_ = pk_seed;
+  std::memcpy(kp.sk_seed_, sk_seed, kSkSeedBytes);
+  kp.height_ = height;
+  kp.subtree_h_ = subtree_h;
+  kp.top_ = {top[0]};
+  kp.finish_top(sk_seed);
+  if (kp.top_ != top) return std::nullopt;
   return kp;
 }
 
-AuthPath XmssKeyPair::extract_auth_path(uint32_t leaf_index) {
+std::optional<AuthPath> XmssKeyPair::extract_auth_path(uint32_t leaf_index) {
   const uint64_t s = uint64_t{leaf_index} >> subtree_h_;
   if (cached_subtree_ != s) {
-    bottom_ = build_subtree(static_cast<uint32_t>(s));
+    auto built = build_subtree(static_cast<uint32_t>(s), xmss_threads());
+    if (built[subtree_h_][0] != top_[0][s]) return std::nullopt;
+    bottom_ = std::move(built);
     cached_subtree_ = s;
   }
 
@@ -315,7 +386,12 @@ std::optional<XmssSignature> XmssKeyPair::sign(const WinternitzSpec& spec,
       compute_wots_pk_hashes(param, leaf_index, sig_hashes, grind.coords);
   const Node leaf = hash_public_key(param, leaf_index, pk_hashes);
 
-  const AuthPath auth_path = extract_auth_path(leaf_index);
+  const std::optional<AuthPath> found = extract_auth_path(leaf_index);
+  if (!found) {
+    --next_leaf_;
+    return std::nullopt;
+  }
+  const AuthPath& auth_path = *found;
   auto [root, calls] = xmss_auth_path(param, leaf, leaf_index, auth_path);
   proofs::check(root == root_, "XMSS root mismatch during signing");
 

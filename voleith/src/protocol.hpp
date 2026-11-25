@@ -27,10 +27,22 @@ struct SecretKey {
 class Signer {
   SecretKey key_;
   std::unique_ptr<xmss_keypair, decltype(&xmss_keypair_free)> tree_;
+  Signer(SecretKey key, xmss_keypair* tree);
 
  public:
   explicit Signer(SecretKey key);
+  // Splits the tree at `subtree_h`, so that top_cache() holds the levels above.
+  Signer(SecretKey key, int subtree_h);
   static Signer generate(int height = XMSS_H_DEFAULT);
+  // Like generate, split at xmss_cache_split_height for a stored top cache.
+  static Signer generate_cached(int height = XMSS_H_DEFAULT);
+  // Resumes a signer from top_cache() without sweeping the leaves; nullopt
+  // unless the nodes fit (key.height, subtree_h) and form one tree.
+  static std::optional<Signer> from_cache(SecretKey key, int subtree_h,
+                                          std::span<const uint8_t> nodes);
+  // The levels above the split, from the bottom one up, and the split.
+  Bytes top_cache() const;
+  int subtree_height() const;
   PublicKey public_key() const;
 
   const SecretKey& secret_key() const { return key_; }

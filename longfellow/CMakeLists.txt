@@ -85,3 +85,34 @@ enable_testing()
 add_test(NAME protocol_test COMMAND protocol_test)
 
 set_tests_properties(protocol_test PROPERTIES TIMEOUT 1200)
+
+# SLH-DSA-SHA2 as the underlying signature (src/slh, circuit/slh_stmt.h).
+add_library(blind_slh_longfellow STATIC
+  src/slh/native.cc
+  src/slh/commit.cc
+  src/slh/prover.cc
+  src/slh/protocol.cc
+)
+target_link_libraries(blind_slh_longfellow PUBLIC blind_xmss_longfellow)
+
+set(SLH_TEST_VECTOR_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../test-vectors/slh")
+# Compiled SLH circuits are cached in the build directory, one per set.
+set(SLH_CIRCUIT_CACHE_DIR "${CMAKE_CURRENT_BINARY_DIR}" CACHE PATH
+    "Directory for the compiled SLH-DSA circuits")
+
+bl_add_executable(slh_test  tests/slh_test.cc  BIG_STACK)
+# blindsig --stateless and bench --stateless prove with the cached SLH circuit as well.
+foreach(t slh_test bench blindsig)
+  target_link_libraries(${t} PRIVATE blind_slh_longfellow)
+  target_compile_definitions(${t} PRIVATE
+    SLH_TEST_VECTOR_DIR="${SLH_TEST_VECTOR_DIR}"
+    SLH_CIRCUIT_CACHE_DIR="${SLH_CIRCUIT_CACHE_DIR}")
+endforeach()
+
+add_test(NAME slh_test_quick COMMAND slh_test --quick)
+add_test(NAME cli COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/tests/cli_test.sh
+         $<TARGET_FILE:blindsig>)
+set_tests_properties(cli PROPERTIES TIMEOUT 1200)
+add_test(NAME slh_test COMMAND slh_test)
+set_tests_properties(slh_test_quick PROPERTIES TIMEOUT 1200)
+set_tests_properties(slh_test PROPERTIES TIMEOUT 3600)

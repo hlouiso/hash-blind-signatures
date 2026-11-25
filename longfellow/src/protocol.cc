@@ -123,10 +123,14 @@ HmCommitment user_commit(const Field& F, Rng& rng, const Bytes& msg,
 
 std::optional<XmssSignature> signer_sign(SignerKey& key,
                                           const HmCommitment& com) {
-
-  const Hash d = hm_com_digest(com);
   XmssKeyPair kp =
       XmssKeyPair::generate_from_seed(key.sk_seed, key.pk_seed, key.height);
+  return signer_sign_with(kp, key, com);
+}
+
+std::optional<XmssSignature> signer_sign_with(XmssKeyPair& kp, SignerKey& key,
+                                              const HmCommitment& com) {
+  const Hash d = hm_com_digest(com);
   kp.set_next_leaf(key.next_leaf);
 
   const WinternitzSpec spec = xmss_wots_spec();

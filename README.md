@@ -45,7 +45,14 @@ blindsig prove               # user:     → blind_sig.bin  (the blind signature
 blindsig verify <msg_file>   # verifier: [PASS]
 ```
 
-`--height <h>` sets the *real* XMSS tree height at `keygen` (default 10, max
+`keygen` picks the underlying signature scheme, and the key files record it:
+
+- `--stateful`, the default, uses target-sum XMSS. Each signature consumes a
+  leaf, so `sign` rewrites `signer_key.bin`.
+- `--stateless` uses SLH-DSA-128-24 (SP 800-230): SHAKE in `voleith/`, SHA2 in
+  the other two. `sign` writes `slh_sig.bin` and never rewrites the key.
+
+`--height <h>` sets the *real* XMSS tree height at stateful `keygen` (default 10, max
 32), i.e. how many one-time signatures the key can issue. The circuit climbs 32
 levels at any height, so nothing else about the session changes.
 Raising it costs keygen time and security bits.
@@ -57,7 +64,8 @@ to reach the verifier over an authenticated channel.
 In `binius64/`, `blindsig keygen --signers n` switches the same five commands to
 the blind multi-signature: `n` signers share one `pk_seed` and one commitment,
 `sign` returns `n` XMSS signatures at a shared epoch, and `prove` aggregates
-them into a single proof.
+them into a single proof. With `--stateless`, the `n` signers hold independent
+SLH-DSA keys and there is no epoch to keep in lockstep.
 
 | Directory | Build the CLI | Binary |
 |---|---|---|
@@ -75,6 +83,12 @@ One command per implementation reproduces every figure that implementation contr
 | `longfellow/` | `./build/bench [iters]` | |
 | `voleith/` | `./build/bench [iters] [height]` | defaults: 10 iterations, height 10 |
 
+The same binaries benchmark the stateless variant with `--stateless`, as in
+`blindsig keygen`: `./build/bench --stateless [iters]` in `longfellow/` and
+`voleith/`, and
+`cargo bench --bench bench -- --stateless` in `binius64/`. There, adding
+`multi` runs the stateless multi-signature sweep, with the environment
+variables `BENCH_MIN_SIGNERS`, `BENCH_MAX_SIGNERS` and `BENCH_MULTI_ITERS`.
 
 ## License
 
