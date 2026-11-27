@@ -5,7 +5,7 @@ use rand::rngs::StdRng;
 use rand::{CryptoRng, Rng, SeedableRng};
 
 use crate::commitment::{CommitmentOpening, HmCommitment, sample_commitment};
-use crate::gadgets::{BLIND_COMMIT_INOUTS, bytes16_to_words, epoch_mask};
+use crate::gadgets::{BLIND_COMMIT_INOUTS, epoch_mask, node_words};
 use crate::protocol::FS_NONCE_BYTES;
 use crate::setup::{BlindZkProver, EPOCH_MASK_INOUT, ProverSetup, build_prover_setup};
 use crate::xmss::XmssSignature;
@@ -77,7 +77,7 @@ impl User {
         self.setup.xmss_verify.populate(&mut filler, xmss_signature);
 
         let w = &self.setup.inout_wires;
-        let root_words = bytes16_to_words(&xmss_signature.root);
+        let root_words = node_words(&xmss_signature.root);
         for (i, word) in root_words.into_iter().enumerate() {
             filler[w[BLIND_COMMIT_INOUTS + i]] = word;
         }

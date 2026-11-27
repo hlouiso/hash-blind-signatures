@@ -4,7 +4,7 @@ use binius_core::word::Word;
 use binius_verifier::config::StdChallenger;
 use binius_verifier::transcript::VerifierTranscript;
 
-use crate::gadgets::{build_blind_commit_public_words, bytes16_to_words, epoch_mask};
+use crate::gadgets::{build_blind_commit_public_words, epoch_mask, node_words};
 use crate::hashes::Digest;
 use crate::protocol::{FS_NONCE_BYTES, verifier::UnifiedVerifyError};
 use crate::salted_zk::verify_salted;
@@ -35,6 +35,7 @@ impl MultiVerifier {
         pk_seed: [u8; PK_SEED_BYTES],
         height: usize,
     ) -> Self {
+        assert!(!roots.is_empty(), "at least one XMSS signer is required");
         MultiVerifier {
             zk_verifier,
             roots,
@@ -92,7 +93,7 @@ impl MultiVerifier {
         let mut inouts: Vec<Word> = Vec::with_capacity(n_inout_multi(self.roots.len()));
         inouts.extend_from_slice(&prefix);
         for root in &self.roots {
-            inouts.extend_from_slice(&bytes16_to_words(root));
+            inouts.extend_from_slice(&node_words(root));
         }
         inouts.push(self.epoch_mask);
         debug_assert_eq!(inouts.len(), n_inout_multi(self.roots.len()));

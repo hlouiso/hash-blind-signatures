@@ -67,8 +67,6 @@ struct Options {
   std::string dir = ".";
   std::string cache;
   std::string msg_file;
-  size_t height = kXmssHDefault;
-  bool height_set = false;
   std::optional<Scheme> scheme;
 
   std::string path(const char* name) const { return dir + "/" + name; }
@@ -81,6 +79,15 @@ struct Options {
                : cache;
   }
 };
+
+// The stateful scheme fixes the XMSS height at the kXmssH levels the circuit
+// checks; a key file of any other height was not made by this keygen.
+void require_fixed_height(size_t height, const char* file) {
+  if (height != kXmssH)
+    throw std::runtime_error(std::string(file) + " has XMSS height " +
+                             std::to_string(height) + "; keys have height " +
+                             std::to_string(kXmssH) + ", run keygen again");
+}
 
 void usage() {
   std::fprintf(stderr,
@@ -95,9 +102,11 @@ void usage() {
       "\n"
       "options:\n"
       "  -d, --dir <path>      directory holding the artefacts (default \".\")\n"
-      "  --stateful            keygen only, the default: XMSS underneath. Each\n"
-      "                        signature consumes a leaf, and sign rewrites\n"
-      "                        signer_key.bin.\n"
+      "  --stateful            keygen only, the default: XMSS of height 24\n"
+      "                        underneath, 2^24 one-time signatures (the\n"
+      "                        lifetime of SLH-DSA-128-24). Each signature\n"
+      "                        consumes a leaf, and sign rewrites signer_key.bin.\n"
+      "                        keygen sweeps all 2^24 leaves, about a minute.\n"
       "  --stateless           keygen only: SLH-DSA-SHA2-128-24 underneath. sign\n"
       "                        never rewrites signer_key.bin. The other commands\n"
       "                        follow the scheme recorded in the key files.\n"
@@ -110,11 +119,6 @@ void usage() {
       "                        build's cache for the key's scheme). The first\n"
       "                        stateless prove or verify compiles its circuit\n"
       "                        once: about a minute and 16 GB of memory.\n"
-      "  --height <h>          real XMSS tree height (stateful keygen only,\n"
-      "                        default 10, max 32).  Keygen sweeps every one of\n"
-      "                        the 2^h leaves and this CLI repeats that sweep on\n"
-      "                        every invocation, so raising it costs time on\n"
-      "                        both; the circuit climbs 32 levels either way.\n"
       "  -h, --help\n");
 }
 
@@ -321,12 +325,12 @@ int cmd_keygen(const Options& opt) {
   SignerKey key;
   rng.fill_bytes(key.sk_seed, kSkSeedBytes);
   rng.fill_bytes(key.pk_seed.data(), key.pk_seed.size());
-  key.height = static_cast<uint8_t>(opt.height);
+  key.height = static_cast<uint8_t>(kXmssH);
   key.next_leaf = 0;
 
   const auto t0 = Clock::now();
   const XmssKeyPair kp = XmssKeyPair::generate_from_seed_split(
-      key.sk_seed, key.pk_seed, opt.height, cache_split_height(opt.height));
+      key.sk_seed, key.pk_seed, kXmssH, cache_split_height(kXmssH));
   const double keygen_ms = ms_since(t0);
   const Node root = kp.public_key();
 
@@ -338,8 +342,8 @@ int cmd_keygen(const Options& opt) {
   write_file(opt.path("signer_cache.bin"), cache_bytes);
 
   std::printf("keygen  ·  stateful  ·  XMSS h=%zu (%llu one-time signatures)  %.0f ms\n",
-              opt.height,
-              static_cast<unsigned long long>(uint64_t{1} << opt.height),
+              kXmssH,
+              static_cast<unsigned long long>(uint64_t{1} << kXmssH),
               keygen_ms);
   std::printf("  root     : %s\n", hex(root.data(), root.size()).c_str());
   std::printf("  pk_seed  : %s\n",
@@ -419,6 +423,7 @@ int cmd_sign(const Options& opt) {
   if (slh::has_magic(key_bytes, slh::kSlhKeyMagic))
     return sign_stateless(opt, key_bytes);
   SignerKey key = read_signer_key(key_bytes);
+  require_fixed_height(key.height, "signer_key.bin");
   const HmCommitment com = read_commitment(read_file(opt.path("commitment.bin")));
 
   const uint64_t leaf = key.next_leaf;
@@ -505,6 +510,7 @@ int cmd_prove(const Options& opt) {
 
   const UserState state = read_user_state(state_bytes);
   const SignerPub pub = read_signer_pub(pub_bytes);
+  require_fixed_height(pub.height, "signer_pub.bin");
 
   const Hash d = hm_com_digest(state.com);
   const auto parsed = read_xmss_sig(read_file(opt.path("xmss_sig.bin")),
@@ -572,6 +578,7 @@ int cmd_verify(const Options& opt) {
   const Bytes msg = read_file(opt.msg_file);
   const BlindSignature bsig = read_blind_sig(read_file(opt.path("blind_sig.bin")));
   const SignerPub pub = read_signer_pub(pub_bytes);
+  require_fixed_height(pub.height, "signer_pub.bin");
 
   const auto t0 = Clock::now();
   const bool ok = verify_blind_sig(F, *circuit, pub, bsig, msg);
@@ -601,14 +608,7 @@ int run(int argc, char** argv) {
       if (i + 1 >= argc) throw std::runtime_error(std::string(what) + " needs a value");
       return argv[++i];
     };
-    if (arg == "--height") {
-      opt.height = static_cast<size_t>(std::stoul(next("--height")));
-      if (opt.height < 1 || opt.height > kXmssH) {
-        std::fprintf(stderr, "error: --height must be in 1..%zu\n", kXmssH);
-        std::exit(1);
-      }
-      opt.height_set = true;
-    } else if (arg == "--stateful" || arg == "--stateless") {
+    if (arg == "--stateful" || arg == "--stateless") {
       const Scheme s = arg == "--stateful" ? Scheme::kStateful : Scheme::kStateless;
       if (opt.scheme && *opt.scheme != s)
         throw std::runtime_error("--stateful and --stateless are mutually exclusive");
@@ -641,9 +641,6 @@ int run(int argc, char** argv) {
   if (opt.scheme && cmd != "keygen")
     throw std::runtime_error("--stateful and --stateless are keygen options; " +
                              cmd + " follows the key files");
-  if (opt.scheme == Scheme::kStateless && opt.height_set)
-    throw std::runtime_error(
-        "--height sets the XMSS tree height and does not apply to --stateless");
 
   if (cmd == "keygen") return cmd_keygen(opt);
   if (cmd == "commit") return cmd_commit(opt);

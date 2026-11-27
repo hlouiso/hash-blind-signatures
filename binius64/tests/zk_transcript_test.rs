@@ -21,7 +21,7 @@ use binius_transcript::{ProverTranscript, fiat_shamir::Challenger};
 use blind_xmss_binius64::{
     BlindZkProver, ProverSetup, Signer, XmssSignature, build_prover_setup,
     commitment::{CommitmentOpening, HmCommitment, sample_commitment},
-    gadgets::{BLIND_COMMIT_INOUTS, bytes16_to_words},
+    gadgets::{BLIND_COMMIT_INOUTS, node_words},
 };
 use bytes::{Buf, BufMut};
 use rand::{Rng, SeedableRng, rngs::StdRng};
@@ -143,7 +143,7 @@ fn prove(
         &session.sig.public_param,
     );
     setup.xmss_verify.populate(&mut filler, &session.sig);
-    for (i, word) in bytes16_to_words(&session.sig.root).into_iter().enumerate() {
+    for (i, word) in node_words(&session.sig.root).into_iter().enumerate() {
         filler[setup.inout_wires[BLIND_COMMIT_INOUTS + i]] = word;
     }
     setup

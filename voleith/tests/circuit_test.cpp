@@ -54,7 +54,7 @@ int main() try {
     auto flags = c.chain_flags(c.number(index, 8));
     require(flags.size() == 42, "decoder width");
     for (size_t i = 0; i < 42; ++i)
-      require(flags[i] == (i == index), "chain index decoder");
+      require(flags[i] == e.pack(c.number(i == index, 1)), "chain index decoder");
   }
   // Compare independent SHAKE implementations at padding boundaries.
   for (size_t n : {size_t(0), 1ul, 135ul, 136ul, 137ul, 272ul, 693ul}) {
@@ -89,12 +89,12 @@ int main() try {
   NativeContext e(p);
   Circuit c(e);
   c.statement(s);
-  require(e.cursor == kWitnessBits && e.constraints == kConstraints &&
-              e.permutations == kPermutations,
-          "fixed circuit dimensions");
   std::cout << "witness bits=" << e.cursor << " bytes=" << e.witness.size()
             << " constraints=" << e.constraints
             << " permutations=" << e.permutations << '\n';
+  require(e.cursor == kWitnessBits && e.constraints == kConstraints &&
+              e.permutations == kPermutations,
+          "fixed circuit dimensions");
   using QS = quicksilver_state<secpar::s128, false, kProofDegree>;
   Bytes extended = e.witness;
   extended.resize(extended.size() + kProofDegree * 16);

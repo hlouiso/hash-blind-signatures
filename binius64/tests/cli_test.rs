@@ -1,6 +1,8 @@
 //! The `blindsig` binary across process boundaries, in both schemes.
 //! The stateless cases generate real SLH-DSA-SHA2-128-24 keys, which takes
-//! seconds per key in a release build.
+//! seconds per key in a release build. The stateful key has the fixed XMSS
+//! height 24: generating it, or rebuilding it without the cache, sweeps 2^24
+//! leaves, about a minute each time on 8 cores, so that test does it twice.
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
@@ -73,8 +75,9 @@ fn session(dir: &Dir, keygen: &[&str]) -> String {
     signed
 }
 
-/// A missing or corrupted cache only costs time: sign rebuilds and rewrites it.
-fn cache_is_rebuilt(dir: &Dir) {
+/// A corrupted cache, and with `also_missing` a missing one, only costs time:
+/// sign rebuilds and rewrites it.
+fn cache_is_rebuilt(dir: &Dir, also_missing: bool) {
     let cache = dir.read("signer_cache.bin");
     let mut bad = cache.clone();
     let mid = bad.len() / 2;
@@ -83,9 +86,11 @@ fn cache_is_rebuilt(dir: &Dir) {
     assert!(ok(dir, &["sign"]).contains("rebuilt"));
     assert_eq!(dir.read("signer_cache.bin"), cache, "the rebuilt cache is the original");
     ok(dir, &["prove"]);
-    std::fs::remove_file(dir.file("signer_cache.bin")).unwrap();
-    assert!(ok(dir, &["sign"]).contains("rebuilt"));
-    assert_eq!(dir.read("signer_cache.bin"), cache);
+    if also_missing {
+        std::fs::remove_file(dir.file("signer_cache.bin")).unwrap();
+        assert!(ok(dir, &["sign"]).contains("rebuilt"));
+        assert_eq!(dir.read("signer_cache.bin"), cache);
+    }
     assert!(ok(dir, &["sign"]).contains("from signer_cache.bin"));
     ok(dir, &["prove"]);
 }
@@ -93,19 +98,20 @@ fn cache_is_rebuilt(dir: &Dir) {
 #[test]
 fn stateful_is_the_default_and_advances_the_key() {
     let dir = Dir::new("stateful");
-    session(&dir, &["keygen", "--height", "3"]);
+    let signed = session(&dir, &["keygen"]);
+    assert!(signed.contains(&format!("of {}", 1u64 << 24)), "{signed}");
+    assert!(!dir.file("slh_sig.bin").exists());
     let key = dir.read("signer_key.bin");
     assert_eq!(&key[key.len() - 8..], &1u64.to_le_bytes(), "next_leaf after one signature");
-    cache_is_rebuilt(&dir);
+    // The cache holds levels 8..=24, so sign rebuilds one 256-leaf subtree.
+    assert_eq!(dir.read("signer_cache.bin").len(), 8 + 2 + 16 * ((1 << 17) - 1) + 32);
+    cache_is_rebuilt(&dir, false);
 
-    // Above the split height (8), sign rebuilds one 256-leaf subtree from the cache.
-    let tall = Dir::new("stateful-tall");
-    session(&tall, &["keygen", "--height", "12"]);
-    assert_eq!(tall.read("signer_cache.bin").len(), 8 + 2 + 16 * 31 + 32);
-
-    let explicit = Dir::new("stateful-flag");
-    session(&explicit, &["keygen", "--stateful", "--height", "2"]);
-    assert!(!explicit.file("slh_sig.bin").exists());
+    // A state committed under the stateful key does not mix with a stateless key.
+    let msg = dir.file("msg");
+    ok(&dir, &["commit", msg.to_str().unwrap()]);
+    ok(&dir, &["keygen", "--stateless"]);
+    assert!(fails(&dir, &["prove"]).contains("run commit again"));
 }
 
 #[test]
@@ -123,11 +129,7 @@ fn stateless_single_and_multi_signer() {
     assert_ne!(dir.read("slh_sig.bin"), first);
     ok(&dir, &["prove"]);
 
-    cache_is_rebuilt(&dir);
-
-    // A state committed under the stateless key does not mix with stateful keys.
-    ok(&dir, &["keygen", "--height", "2"]);
-    assert!(fails(&dir, &["prove"]).contains("run commit again"));
+    cache_is_rebuilt(&dir, true);
 
     let multi = Dir::new("stateless-multi");
     session(&multi, &["keygen", "--stateless", "-n", "2"]);
@@ -138,7 +140,7 @@ fn stateless_single_and_multi_signer() {
 fn scheme_flags_are_validated() {
     let dir = Dir::new("flags");
     assert!(fails(&dir, &["keygen", "--stateful", "--stateless"]).contains("mutually exclusive"));
-    assert!(fails(&dir, &["keygen", "--stateless", "--height", "3"]).contains("--height"));
+    assert!(fails(&dir, &["keygen", "--height", "10"]).contains("unknown option"));
     assert!(fails(&dir, &["sign", "--stateless"]).contains("keygen options"));
     let msg = dir.file("msg");
     std::fs::write(&msg, b"m").unwrap();

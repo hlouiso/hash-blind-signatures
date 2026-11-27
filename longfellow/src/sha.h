@@ -65,6 +65,9 @@ Bytes build_public_key_hash(const Bytes& param, uint32_t epoch,
 
 Bytes build_tree_prefix(const Bytes& param);
 
+// The SHA-256 state after compressing one 64-byte block from the IV.
+Midstate sha256_midstate(const uint8_t block[64]);
+
 Midstate tree_midstate(const Bytes& param);
 
 Hash hash_message(const Bytes& param, uint32_t epoch, const uint8_t* nonce,

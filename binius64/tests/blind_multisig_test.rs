@@ -63,7 +63,7 @@ fn blind_multisig_full_roundtrip() {
         blind_sig.proof.truncate(original_len);
     }
 
-    let previous_label = b"blind-xmss-binius64-multisig-v9-salted-ghash";
+    let previous_label = b"blind-xmss-binius64-multisig-v11-sha256-salted-ghash";
     blind_sig.proof[..previous_label.len()].copy_from_slice(previous_label);
     assert!(matches!(
         verifier.verify(&blind_sig, &message),
@@ -71,6 +71,12 @@ fn blind_multisig_full_roundtrip() {
             blind_xmss_binius64::protocol::verifier::UnifiedVerifyError::InvalidDomainSeparator
         ))
     ));
+}
+
+#[test]
+fn empty_signer_set_is_rejected_at_setup() {
+    assert!(blind_xmss_binius64::build_prover_setup_multi(0).is_err());
+    assert!(blind_xmss_binius64::build_verifier_setup_multi(0).is_err());
 }
 
 #[test]

@@ -40,7 +40,7 @@ namespace {
 using proofs::Circuit;
 using EvalBackend = proofs::EvaluationBackend<Field>;
 using EvalLogic = proofs::Logic<Field, EvalBackend>;
-using Encoder = proofs::BitPluckerEncoder<Field, kPluckerSize>;
+using Encoder = proofs::BitPluckerEncoder<Field, kXmssPluckerSize>;
 
 struct Tally {
   int pass = 0;
@@ -317,9 +317,11 @@ void test_xmss(Tally& t) {
     PkSeed vector_pk_seed;
     vector_pk_seed.fill(0x22);
 
+    // Computed by binius64 (XmssKeyPair::generate_from_seed), which derives
+    // keys the same way, for the 24-level path.
     static constexpr Node kExpectedRoot = {
-        0x9f, 0x15, 0x27, 0x7d, 0x0b, 0x43, 0x82, 0x09,
-        0x36, 0xe9, 0xc0, 0xf0, 0x25, 0x6f, 0xa5, 0x4a,
+        0x08, 0xdc, 0xfc, 0x1e, 0xf7, 0x35, 0xc3, 0x3b,
+        0xf1, 0x7e, 0x53, 0x00, 0x8a, 0xec, 0x1c, 0xf4,
     };
     const Node root_a = XmssKeyPair::generate_from_seed(
                             seed_a.data(), vector_pk_seed, kTestXmssH)
@@ -342,9 +344,9 @@ void test_xmss(Tally& t) {
   t.record("XMSS sign #1: correct shape, root == pk", shape_ok);
   t.record("XMSS leaf counter advanced", kp.remaining() == 1023);
 
-  t.record("signature shape: 42 chain starts of 16 B, 32 path nodes of 16 B, "
+  t.record("signature shape: 42 chain starts of 16 B, 24 path nodes of 16 B, "
            "24 B nonce",
-           kLen == 42 && kNodeBytes == 16 && kXmssH == 32 &&
+           kLen == 42 && kNodeBytes == 16 && kXmssH == 24 &&
                kNonceLength == 24 && kPkSeedBytes == 16);
 
   {
@@ -669,7 +671,7 @@ void test_serialization(const Field& F, Tally& t) {
     if (ok) {
 
       const std::vector<uint8_t> wire = write_xmss_sig(*sig);
-      t.record("xmss_sig is the minimal 1212 B", wire.size() == 1212);
+      t.record("xmss_sig is the minimal 1084 B", wire.size() == 1084);
       const Hash d = hm_com_digest(com);
       const auto parsed = read_xmss_sig(wire, key.pk_seed, kTestXmssH,
                                         d.data(), d.size());
@@ -740,11 +742,9 @@ typename L_::template bitvec<kNodeBits> node_to_nodew(
 }
 
 template <class L_>
-typename proofs::FlatSHA256Circuit<L_, proofs::BitPlucker<L_, kPluckerSize>>::
-    packed_v32
+typename XmssFlatSha<L_>::packed_v32
     eval_packed_v32(const L_& L, Encoder& enc, uint32_t v) {
-  using PV = typename proofs::FlatSHA256Circuit<
-      L_, proofs::BitPlucker<L_, kPluckerSize>>::packed_v32;
+  using PV = typename XmssFlatSha<L_>::packed_v32;
   const auto elts = enc.mkpacked_v32(v);
   PV pv;
   for (size_t j = 0; j < pv.size(); ++j) pv[j] = L.konst(elts[j]);
@@ -753,8 +753,7 @@ typename proofs::FlatSHA256Circuit<L_, proofs::BitPlucker<L_, kPluckerSize>>::
 
 template <class L_>
 void fill_eval_bw(
-    typename proofs::FlatSHA256Circuit<
-        L_, proofs::BitPlucker<L_, kPluckerSize>>::BlockWitness& bw,
+    typename XmssFlatSha<L_>::BlockWitness& bw,
     const L_& L, Encoder& enc, const NativeBW& nbw) {
   for (size_t k = 0; k < 48; ++k) bw.outw[k] = eval_packed_v32(L, enc, nbw.outw[k]);
   for (size_t k = 0; k < 64; ++k) {
@@ -848,6 +847,23 @@ bool tamper_rejected(const Field& F, const NativeWitness& nw,
   return ebk.assertion_failed();
 }
 
+void test_word_plucker(const Field& F, Tally& t) {
+  Encoder enc(F);
+  EvalBackend ebk(F, false);
+  EvalLogic L(&ebk, F);
+  XmssWordPlucker<EvalLogic> plucker(L);
+  for (uint32_t v : {0x01234567u, 0x89abcdefu}) {
+    const auto bits = plucker.unpack_v32(eval_packed_v32(L, enc, v));
+    L.vassert_eq(bits, static_cast<uint64_t>(v));
+  }
+  t.record("packed SHA word decodes every nibble", !ebk.assertion_failed());
+  // This field element is outside the 16 encoder points.
+  auto word = eval_packed_v32(L, enc, 0);
+  word[0] = L.konst(F.addf(enc.encode(0), F.of_scalar(32)));
+  plucker.unpack_v32(word);
+  t.record("packed SHA word rejects a non-encoder point", ebk.assertion_failed());
+}
+
 void test_circuit_constraints(const Field& F, Tally& t,
                               const NativeWitness& nw,
                               const Elt pow_x[kBits128]) {
@@ -887,11 +903,11 @@ void test_circuit_constraints(const Field& F, Tally& t,
                                             StatementWires<EvalLogic>& W) {
              W.xmss.sig_hash[0][0].c0 = F.addf(W.xmss.sig_hash[0][0].c0, F.one());
            }));
-  t.record("tamper sig_hash[0][160] → upper node limb rejected",
+  t.record("tamper sig_hash[0] high bit → chain rejected",
            tamper_rejected(F, nw, pow_x, [](const EvalLogic&, const Field& F,
                                             StatementWires<EvalLogic>& W) {
-             W.xmss.sig_hash[0][160].c0 =
-                 F.addf(W.xmss.sig_hash[0][160].c0, F.one());
+             W.xmss.sig_hash[0][kNodeBits - 1].c0 =
+                 F.addf(W.xmss.sig_hash[0][kNodeBits - 1].c0, F.one());
            }));
 
   t.record("tamper step chain h1[0] → pooled chain SHA rejected",
@@ -906,11 +922,11 @@ void test_circuit_constraints(const Field& F, Tally& t,
              W.xmss.auth[0][0].c0 = F.addf(W.xmss.auth[0][0].c0, F.one());
            }));
 
-  t.record("tamper root[160] → upper node limb rejected",
+  t.record("tamper root high bit → Merkle path rejected",
            tamper_rejected(F, nw, pow_x, [](const EvalLogic&, const Field& F,
                                             StatementWires<EvalLogic>& W) {
-             W.xmss.xmss_root[160].c0 =
-                 F.addf(W.xmss.xmss_root[160].c0, F.one());
+             W.xmss.xmss_root[kNodeBits - 1].c0 =
+                 F.addf(W.xmss.xmss_root[kNodeBits - 1].c0, F.one());
            }));
 }
 
@@ -1065,6 +1081,7 @@ int run() {
   fill_pow_x(F, pow_x);
 
   std::printf("== native primitives ==\n");
+  test_word_plucker(F, t);
   test_sha_and_codeword(t);
   test_wots(t);
   test_xmss(t);

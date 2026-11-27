@@ -28,7 +28,7 @@ struct SignerKey {
   uint8_t sk_seed[kSkSeedBytes];
   PkSeed  pk_seed;
 
-  uint8_t height = static_cast<uint8_t>(kXmssHDefault);
+  uint8_t height = static_cast<uint8_t>(kXmssH);
   uint64_t next_leaf;
 };
 

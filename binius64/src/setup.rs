@@ -44,16 +44,39 @@ impl std::fmt::Display for WiringCapacityError {
 
 impl std::error::Error for WiringCapacityError {}
 
+// The opt-in is also usable with a Cargo patch that partitions sparse wiring.
+// Enabling it with the locked, single-vector backend must still enforce that
+// backend's address limit. Inspect the getter's return type before setup.
+#[cfg(feature = "wide-wiring")]
+pub(crate) fn partitioned_wiring() -> bool {
+    use binius_math::multilinear::sparse::SparseBitVector;
+    use binius_verifier::protocols::shift::WiringInfo;
+    use std::any::TypeId;
+
+    fn is_partitioned<T: 'static>(_: fn(&WiringInfo) -> &T) -> bool {
+        TypeId::of::<T>() != TypeId::of::<SparseBitVector>()
+    }
+    is_partitioned(WiringInfo::hidden_segment)
+}
+
+#[cfg(not(feature = "wide-wiring"))]
+pub(crate) fn partitioned_wiring() -> bool {
+    false
+}
+
 pub(crate) fn build_verifier_rate(
     cs: ConstraintSystem,
     log_inv_rate: usize,
 ) -> anyhow::Result<BlindZkVerifier> {
     cs.validate()?;
     // Check the upstream WiringInfo::new precondition before it can panic.
-    let required_bits = LOG_OPERANDS
-        + 2 * LOG_SHIFT_COUNT
-        + cs.log_segment_words(InoutSegment::Public)
-        + log_constraint_point(&cs);
+    let column_bits =
+        LOG_OPERANDS + 2 * LOG_SHIFT_COUNT + cs.log_segment_words(InoutSegment::Public);
+    let required_bits = if partitioned_wiring() {
+        column_bits
+    } else {
+        column_bits + log_constraint_point(&cs)
+    };
     if required_bits >= u64::BITS as usize {
         return Err(WiringCapacityError { required_bits }.into());
     }

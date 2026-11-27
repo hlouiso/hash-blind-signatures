@@ -29,7 +29,7 @@ struct Statement {
   std::array<uint8_t, 32> message;
   std::array<uint8_t, 16> pk_seed;
   std::array<uint8_t, 16> root;
-  uint8_t height;  // the signer's real XMSS height h, in [1, 32]
+  uint8_t height;  // the signer's real XMSS height h, in [1, XMSS_H]
 };
 
 // Native and authenticated evaluation must share witness and constraint order.
@@ -284,22 +284,30 @@ class Circuit {
     return result;
   }
 
-  Bits chain_flags(const Bits& index) {
+  // Decode two 3-bit halves once. Their products already have degree two
+  // in QuickSilver and can be used directly in the three field lookups.
+  auto chain_flags(const Bits& index) {
     e.zero(index[6]);
     e.zero(index[7]);
-    Bits flags{invert(index[5]), index[5]};
-    // Share p*x between both children; discard prefixes >=42.
-    for (int bit = 4; bit >= 0; --bit) {
-      const size_t count = (42 + (size_t(1) << bit) - 1) >> bit;
-      Bits next;
-      next.reserve(count);
-      for (size_t i = 0; i < flags.size(); ++i) {
-        auto one = e.mul(flags[i], index[bit]);
-        next.push_back(e.add(flags[i], one));
-        if (2 * i + 1 < count) next.push_back(one);
+    auto decode_three = [&](size_t offset) {
+      Bits flags{invert(index[offset + 2]), index[offset + 2]};
+      for (size_t bit : {offset + 1, offset}) {
+        Bits next;
+        for (const auto& flag : flags) {
+          auto one = e.mul(flag, index[bit]);
+          next.push_back(e.add(flag, one));
+          next.push_back(one);
+        }
+        flags = std::move(next);
       }
-      flags = std::move(next);
-    }
+      return flags;
+    };
+    auto lo = decode_three(0), hi = decode_three(3);
+    auto packed = [&](const Bit& bit) { return e.pack(std::span(&bit, 1)); };
+    using Flag = decltype(e.product(packed(lo[0]), packed(hi[0])));
+    std::array<Flag, XMSS_WOTS_LEN> flags;
+    for (size_t i = 0; i < flags.size(); ++i)
+      flags[i] = e.product(packed(lo[i % 8]), packed(hi[i / 8]));
     return flags;
   }
 
@@ -370,7 +378,7 @@ class Circuit {
 
   void statement(const Statement& pub) {
     if (pub.height < 1 || pub.height > XMSS_H)
-      throw std::invalid_argument("XMSS height must be in [1,32]");
+      throw std::invalid_argument("XMSS height must be in [1," + std::to_string(XMSS_H) + "]");
     auto r = input(0, 96), a = input(96, 192);
     auto m = constant(pub.message), seed = constant(pub.pk_seed);
     Bits b;
@@ -388,7 +396,7 @@ class Circuit {
     append(com, y);
     auto d = hash("HMd", com);
     auto epoch = input(kSigOffset, 4), nonce = input(kSigOffset + 4, 24);
-    // The path climbs all 32 levels; a leaf index at or above 2^h would climb
+    // The path climbs all XMSS_H levels; a leaf index at or above 2^h would climb
     // into the seed-derived siblings rather than the real tree.
     e.zero(e.pack(Bits(epoch.begin() + pub.height, epoch.end())));
     Bits epoch_be;
@@ -399,7 +407,7 @@ class Circuit {
     append(msg_dom, epoch_be);
     Bits msg = nonce;
     append(msg, d);
-    auto digest = hash(msg_dom, msg);
+    auto digest = hash(msg_dom, msg, 16);
     e.zero(digest[63]);
     e.zero(digest[127]);
     using Packed = decltype(e.pack(digest));
@@ -426,21 +434,21 @@ class Circuit {
     for (size_t step = 0; step < 99; ++step) {
       auto index = input(kScheduleOffset + step, 1);
       auto flags = chain_flags(index);
-      auto flag_sum = e.constant(0);
-      for (const auto& flag : flags) flag_sum = e.add(flag_sum, flag);
-      e.zero(invert(flag_sum));
+      auto flag_sum = flags[0];
+      for (size_t i = 1; i < flags.size(); ++i) flag_sum = flag_sum + flags[i];
+      e.zero(flag_sum + e.pack(number(1, 1)));
       auto same = step ? equal(index, previous_index) : e.constant(0);
       if (step) {
         e.zero(less(index, previous_index));
         e.zero(e.product(e.pack(std::span(&same, 1)) + e.pack(number(1, 1)),
                          e.pack(previous_pos) + e.pack(number(7, 3))));
       }
-      const auto first_flag = e.pack(std::span(&flags[0], 1));
+      const auto& first_flag = flags[0];
       auto selected_tip = e.product(first_flag, tips[0]);
       auto selected_end = e.product(first_flag, ends[0]);
       auto selected_coord = e.product(first_flag, coords[0]);
       for (size_t i = 1; i < 42; ++i) {
-        auto flag = e.pack(std::span(&flags[i], 1));
+        const auto& flag = flags[i];
         selected_tip = selected_tip + e.product(flag, tips[i]);
         selected_end = selected_end + e.product(flag, ends[i]);
         selected_coord = selected_coord + e.product(flag, coords[i]);
@@ -473,9 +481,12 @@ class Circuit {
     append(leaf_dom, epoch_be);
     auto node = hash(leaf_dom, endpoints, 16);
     auto idx = epoch;
-    for (size_t level = 0; level < 32; ++level) {
+    for (size_t level = 0; level < XMSS_H; ++level) {
       auto sibling = input(kSigOffset + 28 + 42 * 16 + level * 16, 16);
-      auto left = select(idx[0], sibling, node);
+      // Multiplication by a Boolean selects the entire field element.
+      auto node_value = e.pack(node);
+      auto left = e.field_witness(e.product(
+          e.pack(std::span(idx).first(1)), node_value + e.pack(sibling)) + node_value);
       Bits right(128);
       for (size_t i = 0; i < 128; ++i)
         right[i] = e.add(e.add(left[i], node[i]), sibling[i]);

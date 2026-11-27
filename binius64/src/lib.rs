@@ -1,4 +1,6 @@
 pub mod hashes;
+pub mod sha_stream;
+pub mod ts_xmss;
 pub mod wots;
 pub mod xmss;
 
@@ -43,7 +45,7 @@ pub use wots::{
 };
 
 pub use xmss::{
-    KeyExhaustedError, SUBTREE_H, XMSS_H, XmssKeyPair, XmssSignError, XmssSignature, xmss_expand,
+    KeyExhaustedError, SUBTREE_H, XmssKeyPair, XmssSignError, XmssSignature, xmss_expand,
     xmss_verify,
 };
 
@@ -56,5 +58,5 @@ pub use serialize::{
 
 pub use hashes::{
     CHAIN_LENGTH, DIGEST_LEN, Digest, LOG_LIFETIME, MESSAGE_LEN, Message, N_HASH, PUBLIC_PARAM_LEN,
-    PublicParam, RANDOMNESS_LEN, Randomness, TARGET_SUM, V, W, blake3_256,
+    PublicParam, RANDOMNESS_LEN, Randomness, TARGET_SUM, V, W,
 };

@@ -11,7 +11,7 @@ void random(std::span<uint8_t> out) {
 }
 
 void validate_key(const SecretKey& key) {
-  if (key.height < 1 || key.height > 32 ||
+  if (key.height < 1 || key.height > XMSS_H ||
       key.next_leaf > (uint64_t(1) << key.height))
     throw std::invalid_argument("invalid XMSS secret key state");
 }
@@ -66,8 +66,8 @@ Signer::Signer(SecretKey key, xmss_keypair* tree)
     : key_(key), tree_(tree, xmss_keypair_free) {}
 
 Signer Signer::generate_cached(int height) {
-  if (height < 1 || height > 32)
-    throw std::invalid_argument("XMSS height must be in [1,32]");
+  if (height < 1 || height > XMSS_H)
+    throw std::invalid_argument("XMSS height must be in [1," + std::to_string(XMSS_H) + "]");
   SecretKey k{};
   k.height = height;
   random(k.seed);
@@ -94,8 +94,8 @@ Bytes Signer::top_cache() const {
 int Signer::subtree_height() const { return xmss_keypair_subtree_height(tree_.get()); }
 
 Signer Signer::generate(int height) {
-  if (height < 1 || height > 32)
-    throw std::invalid_argument("XMSS height must be in [1,32]");
+  if (height < 1 || height > XMSS_H)
+    throw std::invalid_argument("XMSS height must be in [1," + std::to_string(XMSS_H) + "]");
   SecretKey k{};
   k.height = height;
   random(k.seed);
@@ -197,8 +197,8 @@ PublicKey decode_public(std::span<const uint8_t> b) {
   memcpy(pk.seed.data(), p, 16);
   memcpy(pk.root.data(), p + 16, 16);
   pk.height = p[32];
-  if (pk.height < 1 || pk.height > 32)
-    throw std::invalid_argument("XMSS height must be in [1,32]");
+  if (pk.height < 1 || pk.height > XMSS_H)
+    throw std::invalid_argument("XMSS height must be in [1," + std::to_string(XMSS_H) + "]");
   return pk;
 }
 

@@ -38,7 +38,7 @@ pub fn build_prover_setup_multi_rate(
     n_signers: usize,
     log_inv_rate: usize,
 ) -> anyhow::Result<(ProverSetupMulti, BlindZkProver)> {
-    let (circuit, cs, fields) = build_circuit_multi(n_signers);
+    let (circuit, cs, fields) = build_circuit_multi(n_signers)?;
 
     let zk_verifier = build_verifier_rate(cs, log_inv_rate)?;
     let zk_prover = BlindZkProver::setup(&zk_verifier)?;
@@ -61,7 +61,7 @@ pub fn build_verifier_setup_multi_rate(
     n_signers: usize,
     log_inv_rate: usize,
 ) -> anyhow::Result<BlindZkVerifier> {
-    let (_circuit, cs, _fields) = build_circuit_multi(n_signers);
+    let (_circuit, cs, _fields) = build_circuit_multi(n_signers)?;
     build_verifier_rate(cs, log_inv_rate)
 }
 
@@ -73,7 +73,8 @@ struct CircuitFields {
 
 fn build_circuit_multi(
     n_signers: usize,
-) -> (binius_frontend::Circuit, ConstraintSystem, CircuitFields) {
+) -> anyhow::Result<(binius_frontend::Circuit, ConstraintSystem, CircuitFields)> {
+    anyhow::ensure!(n_signers > 0, "at least one XMSS signer is required");
     let b = CircuitBuilder::new();
 
     let commit = BlindCommitGadget::new(&b);
@@ -111,7 +112,7 @@ fn build_circuit_multi(
         inout_wires,
     };
 
-    (circuit, cs, fields)
+    Ok((circuit, cs, fields))
 }
 
 #[cfg(test)]
@@ -121,10 +122,13 @@ mod tests {
 
     #[test]
     fn oversized_multisig_returns_capacity_error_instead_of_panicking() {
+        if crate::setup::partitioned_wiring() {
+            return;
+        }
         let err = build_verifier_setup_multi(64)
             .err()
             .expect("64 signers exceed the pinned upstream wiring capacity");
         let capacity = err.downcast_ref::<WiringCapacityError>().unwrap();
-        assert_eq!(capacity.required_bits, 65);
+        assert_eq!(capacity.required_bits, 67);
     }
 }

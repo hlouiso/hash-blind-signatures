@@ -4,7 +4,7 @@ use binius_core::word::Word;
 use binius_verifier::config::StdChallenger;
 use binius_verifier::transcript::VerifierTranscript;
 
-use crate::gadgets::{build_blind_commit_public_words, bytes16_to_words, epoch_mask};
+use crate::gadgets::{build_blind_commit_public_words, epoch_mask, node_words};
 use crate::hashes::Digest;
 use crate::protocol::FS_NONCE_BYTES;
 use crate::salted_zk::verify_salted;
@@ -82,7 +82,7 @@ impl Verifier {
 
     fn build_public_inputs(&self, msg: &[u8]) -> Vec<Word> {
         let prefix = build_blind_commit_public_words(msg, &self.pk_seed);
-        let xmss_root_words = bytes16_to_words(&self.xmss_root);
+        let xmss_root_words = node_words(&self.xmss_root);
 
         let mut inouts: Vec<Word> = Vec::with_capacity(prefix.len() + xmss_root_words.len() + 1);
         inouts.extend_from_slice(&prefix);

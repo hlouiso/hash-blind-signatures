@@ -93,7 +93,11 @@ void evaluate(E& e, const Statement& s) {
   c.statement(s);
   if (e.cursor != kWitnessBits || e.constraints != kConstraints ||
       e.permutations != kPermutations)
-    throw std::logic_error("circuit and VOLE parameters disagree");
+    throw std::logic_error(
+        "circuit and VOLE parameters disagree: the circuit has " +
+        std::to_string(e.cursor) + " witness bits, " +
+        std::to_string(e.constraints) + " constraints and " +
+        std::to_string(e.permutations) + " permutations");
 }
 }
 

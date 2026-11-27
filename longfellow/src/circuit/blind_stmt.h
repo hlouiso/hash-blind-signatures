@@ -1,7 +1,8 @@
 /* Public inputs are m_hat, pk_seed, XMSS root, and the Merkle-prefix
  * midstate (a function of pk_seed). The witness opens the Halevi–Micali
  * commitment and contains a target-sum WOTS+/XMSS signature on
- * d = SHA256(a || b || y) at a secret leaf index. */
+ * d = SHA-256(TAG_DIGEST || a || b || y) at a secret leaf index. The tagged
+ * hashes y and d start from the constant midstates of commitment.h's tags. */
 
 #ifndef BLIND_LONGFELLOW_CIRCUIT_BLIND_STMT_H_
 #define BLIND_LONGFELLOW_CIRCUIT_BLIND_STMT_H_
@@ -15,6 +16,7 @@
 #include "circuits/sha/flatsha256_circuit.h"
 #include "util/panic.h"
 
+#include "circuit/xmss_word_plucker.h"
 #include "commitment.h"
 #include "field.h"
 #include "sha.h"
@@ -38,6 +40,7 @@ constexpr size_t kPooledChainLen = kLen * (kW - 1) - kTargetSum;
 
 constexpr size_t sha_blocks(size_t len) { return (len + 9 + 63) / 64; }
 
+// y and d hash a whole tag block first; their block counts start after it.
 constexpr size_t kRevealLen = kRBytes;
 constexpr size_t kRevealBlocks = sha_blocks(kRevealLen);
 constexpr size_t kComLen = kComBytes;
@@ -66,11 +69,14 @@ template <class LC>
 using StmtBW = typename StmtFlatSha<LC>::BlockWitness;
 
 template <class LC>
+using XmssFlatSha = proofs::FlatSHA256Circuit<LC, XmssWordPlucker<LC>>;
+
+template <class LC>
 struct CommitWires {
   using EltW = typename LC::EltW;
   using v8 = typename LC::v8;
   using v256 = typename LC::v256;
-  using BW = StmtBW<LC>;
+  using BW = typename XmssFlatSha<LC>::BlockWitness;
 
   std::array<v8, kYBytes> mhat;
 
@@ -97,7 +103,7 @@ template <class LC>
 struct XmssWires {
   using v8 = typename LC::v8;
   using NodeW = typename LC::template bitvec<kNodeBits>;
-  using BW = StmtBW<LC>;
+  using BW = typename XmssFlatSha<LC>::BlockWitness;
 
   NodeW xmss_root;
 
@@ -120,8 +126,8 @@ struct XmssWires {
 template <class LC>
 struct StatementWires {
   using v32 = typename LC::v32;
-  using FlatSha = StmtFlatSha<LC>;
-  using BW = StmtBW<LC>;
+  using FlatSha = XmssFlatSha<LC>;
+  using BW = typename XmssFlatSha<LC>::BlockWitness;
 
   CommitWires<LC> commit;
   SharedXmssWires<LC> shared;
@@ -256,13 +262,55 @@ typename LC::v256 assert_sha_tail(
   return digest_of(L, sha, bw[0]);
 }
 
+/* SHA-256(tag || msg) from the constant midstate after the tag block; blocks
+ * counts msg's blocks, padding included. */
+template <class LC, class FlatSha>
+typename LC::v256 assert_tagged_sha(const LC& L, const FlatSha& sha,
+                                    const Tag& tag,
+                                    const std::vector<typename LC::v8>& msg,
+                                    size_t msg_len, size_t blocks,
+                                    const typename FlatSha::BlockWitness* bw) {
+  using v8 = typename LC::v8;
+  using v32 = typename LC::v32;
+  proofs::check(msg_len + 9 <= 64 * blocks, "assert_tagged_sha: too few blocks");
+
+  std::vector<v8> in(64 * blocks);
+  for (size_t i = 0; i < msg_len; ++i) in[i] = msg[i];
+  in[msg_len] = L.template vbit<8>(0x80);
+  for (size_t i = msg_len + 1; i < 64 * blocks; ++i) in[i] = L.template vbit<8>(0);
+  const uint64_t bitlen = static_cast<uint64_t>(kTagBytes + msg_len) * 8;
+  for (size_t k = 0; k < 8; ++k) {
+    in[64 * blocks - 1 - k] = L.template vbit<8>((bitlen >> (8 * k)) & 0xff);
+  }
+
+  const Midstate mid = tag_midstate(tag);
+  v32 h0[8];
+  for (size_t k = 0; k < 8; ++k) h0[k] = L.template vbit<32>(mid[k]);
+  for (size_t b = 0; b < blocks; ++b) {
+    const v8* inb = &in[64 * b];
+    v32 w[16];
+    for (size_t i = 0; i < 16; ++i) {
+      w[i] = L.vappend(L.vappend(inb[4 * i + 3], inb[4 * i + 2]),
+                       L.vappend(inb[4 * i + 1], inb[4 * i + 0]));
+    }
+    if (b == 0) {
+      sha.assert_transform_block(w, h0, bw[0].outw, bw[0].oute, bw[0].outa,
+                                 bw[0].h1);
+    } else {
+      sha.assert_transform_block(w, bw[b - 1].h1, bw[b].outw, bw[b].oute,
+                                 bw[b].outa, bw[b].h1);
+    }
+  }
+  return digest_of(L, sha, bw[blocks - 1]);
+}
+
 template <class LC>
 typename LC::v256 assert_commit(const LC& L, const CommitWires<LC>& W,
                                 const Elt pow_x[]) {
   using v8 = typename LC::v8;
   using v256 = typename LC::v256;
   using EltW = typename LC::EltW;
-  const StmtFlatSha<LC> sha(L);
+  const XmssFlatSha<LC> sha(L);
 
   v256 com_y;
   {
@@ -270,8 +318,8 @@ typename LC::v256 assert_commit(const LC& L, const CommitWires<LC>& W,
     size_t o = 0;
     for (size_t i = 0; i < kNNonce; ++i)
       for (size_t j = 0; j < kFeBytes; ++j) msg[o++] = W.r_bytes[i][j];
-    com_y = assert_sha(L, sha, msg, kRevealLen, kRevealBlocks,
-                       W.reveal_bw.data());
+    com_y = assert_tagged_sha(L, sha, kXmssTagNonce, msg, kRevealLen,
+                              kRevealBlocks, W.reveal_bw.data());
   }
 
   {
@@ -298,8 +346,8 @@ typename LC::v256 assert_commit(const LC& L, const CommitWires<LC>& W,
   for (size_t k = 0; k < kNLines; ++k)
     for (size_t j = 0; j < kFeBytes; ++j) msg[o++] = W.b_bytes[k][j];
   for (size_t p = 0; p < kYBytes; ++p) msg[o++] = state_byte(L, com_y, p);
-  const v256 com_d = assert_sha(L, sha, msg, kComLen, kComBlocks,
-                                W.com_bw.data());
+  const v256 com_d = assert_tagged_sha(L, sha, kXmssTagDigest, msg, kComLen,
+                                       kComBlocks, W.com_bw.data());
   return v256(com_d);
 }
 
@@ -313,12 +361,17 @@ void assert_xmss(const LC& L, const SharedXmssWires<LC>& S,
   using v256 = typename LC::v256;
   using NodeW = typename LC::template bitvec<kNodeBits>;
   using BitW = typename LC::BitW;
-  const StmtFlatSha<LC> sha(L);
+  const XmssFlatSha<LC> sha(L);
 
-  static_assert(kXmssH == 32, "the epoch is exactly the bits the tree addresses");
+  static_assert(kXmssH <= 32, "the tree addresses bits of the 32-bit epoch");
 
-  // The path climbs all 32 levels; an epoch at or above 2^h would climb into
-  // the seed-derived siblings rather than the real tree.
+  // The epoch's hashed bytes must be the epoch the path climbs to, so its bits
+  // above the tree are zero.
+  L.vassert0(L.vand(
+      L.template vbit<32>(~((uint64_t{1} << kXmssH) - 1) & 0xffffffffu), epoch));
+
+  // The path climbs all kXmssH levels; an epoch at or above 2^h would climb
+  // into the seed-derived siblings rather than the real tree.
   L.vassert0(L.vand(S.leaf_mask, epoch));
 
   v256 message_hash;

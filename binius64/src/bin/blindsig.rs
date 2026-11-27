@@ -21,7 +21,7 @@ use blind_xmss_binius64::slh::serialize::{
 use blind_xmss_binius64::{
     Digest, LOG_LIFETIME, MultiUser, MultiVerifier, PK_SEED_BYTES, SK_SEED_BYTES, Signer,
     SignerKey, User,
-    Verifier, XMSS_H, XmssSignature, build_prover_setup, build_prover_setup_multi,
+    Verifier, XmssSignature, build_prover_setup, build_prover_setup_multi,
     build_verifier_setup, build_verifier_setup_multi, com_digest, read_blind_sig, read_commitment,
     read_signer_keys, read_signer_pub, read_user_state, read_xmss_sigs, write_blind_sig,
     write_commitment, write_signer_keys, write_signer_pub, write_user_state, write_xmss_sigs,
@@ -48,8 +48,6 @@ impl Scheme {
 struct Options {
     dir: PathBuf,
     signers: usize,
-    height: usize,
-    height_set: bool,
     scheme: Option<Scheme>,
     msg_file: Option<PathBuf>,
 }
@@ -76,9 +74,11 @@ commands:
 
 options:
   -d, --dir <path>      directory holding the artefacts (default \".\")
-      --stateful        keygen only, the default: XMSS underneath. Each
-                        signature consumes a leaf, and sign rewrites
-                        signer_key.bin.
+      --stateful        keygen only, the default: XMSS of height 24
+                        underneath, 2^24 one-time signatures (the lifetime
+                        of SLH-DSA-128-24). Each signature consumes a leaf,
+                        and sign rewrites signer_key.bin. keygen sweeps all
+                        2^24 leaves, about a minute per signer on 8 cores.
       --stateless       keygen only: SLH-DSA-SHA2-128-24 underneath. sign
                         never rewrites signer_key.bin. The other commands
                         follow the scheme recorded in the key files.
@@ -88,13 +88,19 @@ options:
                         without it, sign rebuilds the key and rewrites it.
   -n, --signers <n>     number of signers (keygen only, default 1); n > 1
                         selects the blind multi-signature
-      --height <h>      real XMSS tree height (stateful keygen only, default
-                        10, max 32). Keygen sweeps every one of the 2^h
-                        leaves and the signer repeats that sweep on every
-                        invocation, so raising this costs time on both; the
-                        circuit climbs 32 levels either way.
   -h, --help
 ";
+
+/// The stateful scheme fixes the XMSS height at the 24 levels the circuit
+/// checks; a key file of any other height was not made by this keygen.
+fn fixed_height(height: usize, file: &str) -> Result<()> {
+    if height != LOG_LIFETIME {
+        bail!(
+            "{file} has XMSS height {height}; keys have height {LOG_LIFETIME}, run keygen again"
+        );
+    }
+    Ok(())
+}
 
 fn read_file(path: &Path) -> Result<Vec<u8>> {
     std::fs::read(path).with_context(|| format!("cannot read {}", path.display()))
@@ -139,7 +145,7 @@ fn node(rng: &mut impl Rng) -> Node {
 /// time: `sign` rebuilds the trees and writes a fresh one.
 const XMSS_CACHE_MAGIC: [u8; 8] = *b"HBS-XMSC";
 const SLH_CACHE_MAGIC: [u8; 8] = *b"HBS-SLHC";
-const CACHE_TAG_DOMAIN: &[u8] = b"blindsig-binius64/signer-cache/v1";
+const CACHE_TAG_DOMAIN: &[u8] = b"blindsig-binius64/signer-cache/v2";
 const CACHE_TAG_BYTES: usize = 32;
 
 fn cache_tag(secret: &[u8], body: &[u8]) -> [u8; CACHE_TAG_BYTES] {
@@ -301,11 +307,12 @@ fn keygen_stateful(opt: &Options) -> Result<()> {
         })
         .collect();
 
-    let split = cache_split_height(opt.height);
+    let height = LOG_LIFETIME;
+    let split = cache_split_height(height);
     let t0 = Instant::now();
     let signers: Vec<Signer> = sk_seeds
         .par_iter()
-        .map(|sk| Signer::from_key_split(sk, &pk_seed, 0, opt.height, split))
+        .map(|sk| Signer::from_key_split(sk, &pk_seed, 0, height, split))
         .collect();
     let keygen_s = t0.elapsed().as_secs_f64();
     let roots: Vec<Digest> = signers.iter().map(Signer::public_key).collect();
@@ -317,9 +324,9 @@ fn keygen_stateful(opt: &Options) -> Result<()> {
             next_leaf: 0,
         })
         .collect();
-    let key_bytes = write_signer_keys(&keys, &pk_seed, opt.height);
-    let pub_bytes = write_signer_pub(&roots, &pk_seed, opt.height);
-    let cache_bytes = write_xmss_cache(&keys, opt.height, &signers);
+    let key_bytes = write_signer_keys(&keys, &pk_seed, height);
+    let pub_bytes = write_signer_pub(&roots, &pk_seed, height);
+    let cache_bytes = write_xmss_cache(&keys, height, &signers);
     write_file(&opt.path("signer_key.bin"), &key_bytes)?;
     write_file(&opt.path("signer_pub.bin"), &pub_bytes)?;
     write_file(&opt.path("signer_cache.bin"), &cache_bytes)?;
@@ -327,8 +334,8 @@ fn keygen_stateful(opt: &Options) -> Result<()> {
     println!(
         "keygen  ·  stateful  ·  {n} signer{}  ·  XMSS h={} ({} one-time signatures each)  {:.0} ms",
         plural(n),
-        opt.height,
-        1u64 << opt.height,
+        height,
+        1u64 << height,
         keygen_s * 1e3
     );
     for (i, root) in roots.iter().enumerate() {
@@ -438,6 +445,7 @@ fn cmd_sign(opt: &Options) -> Result<()> {
 fn sign_stateful(opt: &Options, key_bytes: &[u8]) -> Result<()> {
     let (keys, pk_seed, height) =
         read_signer_keys(key_bytes).context("malformed signer_key.bin")?;
+    fixed_height(height, "signer_key.bin")?;
     let com = read_commitment(&read_file(&opt.path("commitment.bin"))?)
         .context("malformed commitment.bin")?;
 
@@ -619,6 +627,7 @@ fn prove_stateful(opt: &Options, pub_bytes: &[u8], state_bytes: &[u8]) -> Result
     let state = read_user_state(state_bytes).context("malformed user_state.bin")?;
     let (roots, pk_seed, height) =
         read_signer_pub(pub_bytes).context("malformed signer_pub.bin")?;
+    fixed_height(height, "signer_pub.bin")?;
 
     let d = com_digest(&state.com);
     let sig_bytes = read_file(&opt.path("xmss_sig.bin"))?;
@@ -732,6 +741,7 @@ fn cmd_verify(opt: &Options) -> Result<()> {
         Scheme::Stateful => {
             let (roots, pk_seed, height) =
                 read_signer_pub(&pub_bytes).context("malformed signer_pub.bin")?;
+            fixed_height(height, "signer_pub.bin")?;
             let n = roots.len();
             println!("verify  ·  stateful  ·  {n} signer{}", plural(n));
             if n == 1 {
@@ -804,8 +814,6 @@ fn run() -> Result<()> {
     let mut opt = Options {
         dir: PathBuf::from("."),
         signers: 1,
-        height: XMSS_H,
-        height_set: false,
         scheme: None,
         msg_file: None,
     };
@@ -825,15 +833,6 @@ fn run() -> Result<()> {
                 if opt.signers == 0 {
                     bail!("--signers must be at least 1");
                 }
-            }
-            "--height" => {
-                i += 1;
-                let v = args.get(i).context("--height needs a value")?;
-                opt.height = v.parse().context("--height takes an integer")?;
-                if !(1..=LOG_LIFETIME).contains(&opt.height) {
-                    bail!("--height must be in 1..={LOG_LIFETIME}");
-                }
-                opt.height_set = true;
             }
             "--stateful" | "--stateless" => {
                 let s = if arg == "--stateful" {
@@ -866,9 +865,6 @@ fn run() -> Result<()> {
     }
     if opt.scheme.is_some() && cmd != "keygen" {
         bail!("--stateful and --stateless are keygen options; {cmd} follows the key files");
-    }
-    if opt.scheme == Some(Scheme::Stateless) && opt.height_set {
-        bail!("--height sets the XMSS tree height and does not apply to --stateless");
     }
 
     match cmd.as_str() {

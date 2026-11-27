@@ -201,7 +201,8 @@ pub fn h_msg(r: &Node, pk_seed: &Node, pk_root: &Node, msg: &[u8], m: usize) -> 
     mgf1_sha256(&seed, m)
 }
 
-fn hmac_sha256(key: &[u8], parts: &[&[u8]]) -> [u8; 32] {
+/// HMAC-SHA-256 (RFC 2104) of the concatenated parts, for keys of at most one block.
+pub(crate) fn hmac_sha256(key: &[u8], parts: &[&[u8]]) -> [u8; 32] {
     assert!(key.len() <= 64);
     let mut k0 = [0u8; 64];
     k0[..key.len()].copy_from_slice(key);

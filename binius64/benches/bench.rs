@@ -11,8 +11,11 @@
 //!
 //! Stateful: the single-signer figures, then the blind multi-signature as n
 //! doubles up to BENCH_MAX_SIGNERS (default 64, the first n past the
-//! capacity), BENCH_MULTI_ITERS runs per row (default 3). BENCH_XMSS_H sets
-//! the real tree height (default 10).
+//! capacity), BENCH_MULTI_ITERS runs per row (default 3). Keys have the
+//! fixed height 24, so each takes about a minute to generate; that is done
+//! once per signer, excluded from the timings, and the sweep reuses the keys
+//! as n grows. Signing is timed as `blindsig sign` does it, from the stored
+//! top levels.
 //!
 //!   RUSTFLAGS="-C target-cpu=native" RAYON_NUM_THREADS=8 BENCH_MULTI_ITERS=10 \
 //!     cargo bench --bench bench
@@ -36,7 +39,8 @@ use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 use rayon::prelude::*;
 
-use blind_xmss_binius64::setup::WiringCapacityError;
+use blind_xmss_binius64::setup::{LOG_INV_RATE, WiringCapacityError};
+use blind_xmss_binius64::xmss::cache_split_height;
 use blind_xmss_binius64::slh::commit::com_digest;
 use blind_xmss_binius64::slh::native::{Node, SlhCtx, SlhKey, SlhSignature, pure_message};
 use blind_xmss_binius64::slh::protocol::{
@@ -45,9 +49,10 @@ use blind_xmss_binius64::slh::protocol::{
 };
 use blind_xmss_binius64::slh::{SLH_DSA_SHA2_128_24, SlhParams};
 use blind_xmss_binius64::{
-    HmCommitment, MultiUser, MultiVerifier, PK_SEED_BYTES, SK_SEED_BYTES, Signer, SignerKey, User,
-    Verifier, XmssSignature, build_prover_setup, build_prover_setup_multi,
-    build_verifier_setup, build_verifier_setup_multi, write_blind_sig, write_commitment,
+    HmCommitment, LOG_LIFETIME, MultiUser, MultiVerifier, PK_SEED_BYTES, SK_SEED_BYTES, Signer,
+    SignerKey, User,
+    Verifier, XmssSignature, build_prover_setup, build_prover_setup_multi, build_verifier_setup,
+    build_verifier_setup_multi, write_blind_sig, write_commitment,
     write_signer_keys, write_signer_pub, write_xmss_sig,
 };
 
@@ -66,10 +71,6 @@ fn make_document(rng: &mut StdRng) -> Vec<u8> {
     let mut doc = vec![0u8; MSG_BYTES];
     rng.fill_bytes(&mut doc);
     doc
-}
-
-fn xmss_h() -> usize {
-    env_usize("BENCH_XMSS_H", 10)
 }
 
 fn mean_secs(iters: usize, mut f: impl FnMut()) -> f64 {
@@ -93,36 +94,83 @@ fn print_size(label: &str, bytes: usize) {
     }
 }
 
-fn signer_keys(rng: &mut StdRng, n: usize) -> (Vec<SignerKey>, [u8; PK_SEED_BYTES]) {
-    let mut pk_seed = [0u8; PK_SEED_BYTES];
-    rng.fill_bytes(&mut pk_seed);
-    let keys = (0..n)
-        .map(|_| {
-            let mut sk_seed = [0u8; SK_SEED_BYTES];
-            rng.fill_bytes(&mut sk_seed);
-            SignerKey {
-                sk_seed,
-                next_leaf: 0,
-            }
-        })
-        .collect();
-    (keys, pk_seed)
+/// The signers' keys at the fixed height, generated once and grown as the
+/// multi-signature sweep needs more. They share one pk_seed, and each keeps
+/// only its top levels, as signer_cache.bin does.
+struct SignerPool {
+    rng: StdRng,
+    pk_seed: [u8; PK_SEED_BYTES],
+    keys: Vec<Signer>,
+    next_epoch: u64,
 }
 
-fn sign_all(
-    keys: &[SignerKey],
-    pk_seed: &[u8; PK_SEED_BYTES],
-    com: &HmCommitment,
-) -> Vec<XmssSignature> {
-    keys.par_iter()
-        .map(|k| {
-            let mut signer = Signer::from_key(&k.sk_seed, pk_seed, k.next_leaf, xmss_h());
-            signer.sign(com).expect("sign failed")
-        })
+impl SignerPool {
+    fn new(seed: u64) -> Self {
+        let mut rng = StdRng::seed_from_u64(seed);
+        let mut pk_seed = [0u8; PK_SEED_BYTES];
+        rng.fill_bytes(&mut pk_seed);
+        Self {
+            rng,
+            pk_seed,
+            keys: Vec::new(),
+            next_epoch: 0,
+        }
+    }
+
+    /// Generates keys until there are `n`; returns the seconds per key.
+    fn grow(&mut self, n: usize) -> Option<f64> {
+        let mut last = None;
+        while self.keys.len() < n {
+            let mut sk_seed = [0u8; SK_SEED_BYTES];
+            self.rng.fill_bytes(&mut sk_seed);
+            let t = Instant::now();
+            let split = cache_split_height(LOG_LIFETIME);
+            let key = Signer::from_key_split(&sk_seed, &self.pk_seed, 0, LOG_LIFETIME, split);
+            let secs = t.elapsed().as_secs_f64();
+            eprintln!(
+                "  keygen: signer {} at h = {LOG_LIFETIME} in {secs:.1} s (excluded)",
+                self.keys.len()
+            );
+            self.keys.push(key);
+            last = Some(secs);
+        }
+        last
+    }
+
+    /// The first `n` signers at one fresh, shared epoch, each resumed from its
+    /// top levels as `blindsig sign` does from signer_cache.bin.
+    fn session(&mut self, n: usize) -> Vec<Signer> {
+        let epoch = self.next_epoch;
+        self.next_epoch += 1;
+        self.keys[..n]
+            .par_iter()
+            .map(|k| {
+                Signer::from_top_levels(
+                    &k.sk_seed(),
+                    &self.pk_seed,
+                    epoch,
+                    LOG_LIFETIME,
+                    k.subtree_height(),
+                    k.top_levels().to_vec(),
+                )
+                .expect("the key's own top levels")
+            })
+            .collect()
+    }
+
+    fn roots(&self, n: usize) -> Vec<blind_xmss_binius64::Digest> {
+        self.keys[..n].iter().map(Signer::public_key).collect()
+    }
+}
+
+fn sign_all(signers: &mut [Signer], com: &HmCommitment) -> Vec<XmssSignature> {
+    signers
+        .par_iter_mut()
+        .map(|s| s.sign(com).expect("sign failed"))
         .collect()
 }
 
-fn bench_single(iters: usize) -> (f64, f64, usize) {
+fn bench_single(iters: usize, pool: &mut SignerPool) -> (f64, f64, usize) {
     let mut rng = StdRng::seed_from_u64(SEED);
     let doc = make_document(&mut rng);
 
@@ -130,8 +178,17 @@ fn bench_single(iters: usize) -> (f64, f64, usize) {
     let (setup, zk_prover) = build_prover_setup().expect("prover setup");
     let zk_verifier = build_verifier_setup().expect("verifier setup");
     let setup_s = t0.elapsed().as_secs_f64();
+    let stat = CircuitStat::collect(&setup.circuit);
+    println!(
+        "  {} AND constraints, {} committed words, BaseFold rate 1/{}",
+        stat.n_and_constraints,
+        stat.committed_allocated,
+        1usize << LOG_INV_RATE
+    );
 
-    let (keys, pk_seed) = signer_keys(&mut rng, 1);
+    let keygen_s = pool.grow(1);
+    let pk_seed = pool.pk_seed;
+    let root = pool.roots(1)[0];
     let mut user = User::with_setup(Arc::new(setup), Arc::new(zk_prover), &mut rng);
 
     let commit_s = mean_secs(iters, || {
@@ -139,14 +196,12 @@ fn bench_single(iters: usize) -> (f64, f64, usize) {
     });
     let com = user.commit(&doc);
 
+    let xmss_sig = sign_all(&mut pool.session(1), &com).remove(0);
     let sign_s = mean_secs(iters, || {
-        let mut signer = Signer::from_key(&keys[0].sk_seed, &pk_seed, 0, xmss_h());
-        signer.sign(&com).expect("sign failed");
+        sign_all(&mut pool.session(1), &com);
     });
-
-    let xmss_sig = sign_all(&keys, &pk_seed, &com).remove(0);
-    let root = xmss_sig.root;
-    let verifier = Verifier::with_zk_verifier(Arc::new(zk_verifier), root, pk_seed, xmss_h());
+    let verifier =
+        Verifier::with_zk_verifier(Arc::new(zk_verifier), root, pk_seed, LOG_LIFETIME);
 
     let sig = user.prove(&xmss_sig).expect("prove failed");
     verifier
@@ -162,7 +217,11 @@ fn bench_single(iters: usize) -> (f64, f64, usize) {
 
     let proof_bytes = write_blind_sig(&sig).len();
 
-    println!("  one-time setup: circuit {setup_s:.2} s (prover + verifier keys, excluded below)\n");
+    println!("  one-time setup: circuit {setup_s:.2} s (prover + verifier keys, excluded below)");
+    if let Some(k) = keygen_s {
+        println!("  one-time keygen: {k:.2} s for the 2^{LOG_LIFETIME} leaves (excluded below)");
+    }
+    println!();
 
     println!("  Average execution times (s)");
     println!(
@@ -171,7 +230,7 @@ fn bench_single(iters: usize) -> (f64, f64, usize) {
     );
     println!(
         "    {:<38} {sign_s:>10.4}",
-        "Key generation + signature (signer)"
+        "Signature from cached top levels"
     );
     println!("    {:<38} {prove_s:>10.4}", "Proof generation (user)");
     println!(
@@ -179,14 +238,18 @@ fn bench_single(iters: usize) -> (f64, f64, usize) {
         "Proof verification (verifier)"
     );
 
+    let key = SignerKey {
+        sk_seed: pool.keys[0].sk_seed(),
+        next_leaf: pool.next_epoch,
+    };
     println!("  Sizes of the main objects");
     print_size(
         "Public key of S (pk)",
-        write_signer_pub(&[root], &pk_seed, xmss_h()).len(),
+        write_signer_pub(&[root], &pk_seed, LOG_LIFETIME).len(),
     );
     print_size(
         "Secret key of S (sk)",
-        write_signer_keys(&keys, &pk_seed, xmss_h()).len(),
+        write_signer_keys(&[key], &pk_seed, LOG_LIFETIME).len(),
     );
     print_size("Commitment M", write_commitment(&com).len());
     print_size("Signature of S", write_xmss_sig(&xmss_sig).len());
@@ -196,7 +259,11 @@ fn bench_single(iters: usize) -> (f64, f64, usize) {
     (prove_s, verify_s, proof_bytes)
 }
 
-fn bench_multi(n: usize, iters: usize) -> anyhow::Result<(f64, f64, usize)> {
+fn bench_multi(
+    n: usize,
+    iters: usize,
+    pool: &mut SignerPool,
+) -> anyhow::Result<(f64, f64, usize)> {
     let mut rng = StdRng::seed_from_u64(SEED ^ 0x55);
     let doc = make_document(&mut rng);
 
@@ -206,10 +273,14 @@ fn bench_multi(n: usize, iters: usize) -> anyhow::Result<(f64, f64, usize)> {
     let mut user = MultiUser::with_setup(Arc::new(setup), Arc::new(zk_prover), &mut rng);
     let com = user.commit(&doc);
 
-    let (keys, pk_seed) = signer_keys(&mut rng, n);
-    let sigs = sign_all(&keys, &pk_seed, &com);
-    let roots: Vec<blind_xmss_binius64::Digest> = sigs.iter().map(|s| s.root).collect();
-    let verifier = MultiVerifier::with_zk_verifier(Arc::new(zk_verifier), roots, pk_seed, xmss_h());
+    pool.grow(n);
+    let sigs = sign_all(&mut pool.session(n), &com);
+    let verifier = MultiVerifier::with_zk_verifier(
+        Arc::new(zk_verifier),
+        pool.roots(n),
+        pool.pk_seed,
+        LOG_LIFETIME,
+    );
 
     let sig = user.prove(&sigs).expect("prove failed");
     verifier
@@ -226,7 +297,6 @@ fn bench_multi(n: usize, iters: usize) -> anyhow::Result<(f64, f64, usize)> {
     Ok((prove_s, verify_s, sig.proof.len()))
 }
 
-
 fn run_stateful() {
     let iters = env_usize("BENCH_ITERS", 10);
     let multi_iters = env_usize("BENCH_MULTI_ITERS", 3);
@@ -237,16 +307,15 @@ fn run_stateful() {
          ({multi_iters} per multi-signature row)"
     );
     println!(
-        "  message {MSG_BYTES} B  ·  BLAKE3, GF(2^128)  ·  XMSS h={} (path {} in circuit)  \
+        "  message {MSG_BYTES} B  ·  SHA-256, GF(2^128)  ·  XMSS h={LOG_LIFETIME}  \
          ·  WOTS+ v={} w={} target={}\n",
-        xmss_h(),
-        blind_xmss_binius64::LOG_LIFETIME,
         blind_xmss_binius64::V,
-        blind_xmss_binius64::W,
+        blind_xmss_binius64::CHAIN_LENGTH,
         blind_xmss_binius64::TARGET_SUM,
     );
 
-    let (prove_1, verify_1, size_1) = bench_single(iters);
+    let mut pool = SignerPool::new(SEED ^ 0x5157);
+    let (prove_1, verify_1, size_1) = bench_single(iters, &mut pool);
 
     println!("  Blind multi-signature as the number of signers n grows");
     println!(
@@ -258,7 +327,7 @@ fn run_stateful() {
         let (prove_s, verify_s, size) = if n == 1 {
             (prove_1, verify_1, size_1)
         } else {
-            match bench_multi(n, multi_iters) {
+            match bench_multi(n, multi_iters, &mut pool) {
                 Ok(result) => result,
                 Err(err) if err.is::<WiringCapacityError>() => {
                     println!("    {n:>5} unsupported: {err}");

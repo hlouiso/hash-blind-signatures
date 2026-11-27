@@ -157,7 +157,7 @@ bool verify_blind_sig(const Field& F, const proofs::Circuit<Field>& circuit,
   if (pub.height < 1 || pub.height > kXmssH) return false;
 
   auto nw = std::make_unique<NativeWitness>();
-  const Hash m_hat = sha256(msg);
+  const Hash m_hat = hm_message_hash(msg);
   std::memcpy(nw->m_hat, m_hat.data(), kHashBytes);
   const Bytes dp = build_wots_domain_param(pub.pk_seed);
   std::memcpy(nw->domain_param, dp.data(), kDomainParamLen);

@@ -41,7 +41,7 @@ int main() try {
   auto malformed = encode(pk);
   malformed.push_back(0);
   rejects([&] { decode_public(malformed); }, "trailing public key byte");
-  for (uint8_t height : {0, 33}) {
+  for (uint8_t height : {0, XMSS_H + 1}) {
     malformed = encode(pk);
     malformed[40] = height;
     rejects([&] { decode_public(malformed); }, "public key height out of range");

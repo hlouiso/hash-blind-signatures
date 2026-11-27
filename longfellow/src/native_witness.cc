@@ -16,6 +16,28 @@
 namespace blind_longfellow {
 namespace {
 
+// Block witnesses of SHA-256(tag || data) from the tag's midstate, one per
+// block of data, padding included.
+void witness_tagged(const Tag& tag, const uint8_t* data, size_t len,
+                    size_t blocks, NativeBW* bw) {
+  std::vector<uint8_t> in(64 * blocks, 0);
+  proofs::check(len + 9 <= in.size(), "witness_tagged: too few blocks");
+  std::memcpy(in.data(), data, len);
+  in[len] = 0x80;
+  const uint64_t bitlen = static_cast<uint64_t>(kTagBytes + len) * 8;
+  for (size_t k = 0; k < 8; ++k)
+    in[in.size() - 1 - k] = static_cast<uint8_t>((bitlen >> (8 * k)) & 0xff);
+  Midstate h = tag_midstate(tag);
+  for (size_t b = 0; b < blocks; ++b) {
+    uint32_t w[16];
+    for (size_t i = 0; i < 16; ++i)
+      w[i] = proofs::SHA256_ru32be(in.data() + 64 * b + 4 * i);
+    proofs::FlatSHA256Witness::transform_and_witness_block(
+        w, h.data(), bw[b].outw, bw[b].oute, bw[b].outa, bw[b].h1);
+    std::memcpy(h.data(), bw[b].h1, sizeof(bw[b].h1));
+  }
+}
+
 [[gnu::noinline]]
 static void fill_parts(NativeWitness& w, const Field& F,
                        const Bytes& user_msg,
@@ -29,7 +51,7 @@ static void fill_parts(NativeWitness& w, const Field& F,
   proofs::check(sig.wots.coords.size() == kLen, "coords size");
   proofs::check(sig.xmss_calls.size() == kXmssH, "xmss_calls size");
 
-  const Hash m_hat = sha256(user_msg);
+  const Hash m_hat = hm_message_hash(user_msg);
   std::memcpy(w.m_hat, m_hat.data(), kHashBytes);
 
   for (size_t i = 0; i < kNNonce; ++i) {
@@ -63,20 +85,14 @@ static void fill_parts(NativeWitness& w, const Field& F,
     uint8_t pre[kRevealLen];
     for (size_t i = 0; i < kNNonce; ++i)
       std::memcpy(pre + i * kFeBytes, w.r_bytes[i].data(), kFeBytes);
-    uint8_t numb = 0;
-    uint8_t pad[64 * kRevealBlocks];
-    proofs::FlatSHA256Witness::transform_and_witness_message(
-        kRevealLen, pre, kRevealBlocks, numb, pad, w.reveal_bw.data());
-    proofs::check(numb == kRevealBlocks, "reveal-r block count");
+    witness_tagged(kXmssTagNonce, pre, kRevealLen, kRevealBlocks,
+                   w.reveal_bw.data());
   }
 
   {
     const Bytes pre = hm_com_digest_preimage(com);
-    uint8_t numb = 0;
-    std::vector<uint8_t> pad(64 * kComBlocks);
-    proofs::FlatSHA256Witness::transform_and_witness_message(
-        kComLen, pre.data(), kComBlocks, numb, pad.data(), w.com_bw.data());
-    proofs::check(numb == kComBlocks, "com-digest block count");
+    witness_tagged(kXmssTagDigest, pre.data(), kComLen, kComBlocks,
+                   w.com_bw.data());
   }
 
   {
@@ -163,7 +179,8 @@ std::unique_ptr<NativeWitness> NativeWitness::build(const Field& F,
 
   PkSeed pk_seed;
   rng.fill_bytes(pk_seed.data(), pk_seed.size());
-  XmssKeyPair kp = XmssKeyPair::generate(rng, pk_seed);
+  // A small tree keeps this test witness quick; the circuit is the same.
+  XmssKeyPair kp = XmssKeyPair::generate(rng, pk_seed, 10);
 
   const uint8_t raw[] = {'b','l','i','n','d','-','l','o','n','g','f','e','l',
                          'l','o','w',' ','t','e','s','t'};

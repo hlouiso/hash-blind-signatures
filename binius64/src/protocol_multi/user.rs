@@ -5,7 +5,7 @@ use rand::rngs::StdRng;
 use rand::{CryptoRng, Rng, SeedableRng};
 
 use crate::commitment::{CommitmentOpening, HmCommitment, sample_commitment};
-use crate::gadgets::{BLIND_COMMIT_INOUTS, bytes16_to_words, epoch_mask};
+use crate::gadgets::{BLIND_COMMIT_INOUTS, epoch_mask, node_words};
 use crate::hashes::DIGEST_WIRES;
 use crate::protocol::{FS_NONCE_BYTES, UserState};
 use crate::setup::BlindZkProver;
@@ -98,7 +98,7 @@ impl MultiUser {
         let w = &self.setup.inout_wires;
         for (j, sig) in signatures.iter().enumerate() {
             let base = BLIND_COMMIT_INOUTS + DIGEST_WIRES * j;
-            for (i, word) in bytes16_to_words(&sig.root).into_iter().enumerate() {
+            for (i, word) in node_words(&sig.root).into_iter().enumerate() {
                 filler[w[base + i]] = word;
             }
         }

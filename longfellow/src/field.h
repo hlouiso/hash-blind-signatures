@@ -19,12 +19,13 @@ using CompilerBackend = proofs::CompilerBackend<Field>;
 using LogicCircuit = proofs::Logic<Field, CompilerBackend>;
 
 constexpr size_t kPluckerSize = 3;
+constexpr size_t kXmssPluckerSize = 4;
 
 constexpr size_t kLigeroRate = 7;
 constexpr size_t kLigeroNreq = 140;
 
 constexpr size_t kTranscriptVersion = 13;
-constexpr char kDomainTag[] = "blind-xmss-longfellow-v6-node184-nonce184-seed144";
+constexpr char kDomainTag[] = "blind-xmss-longfellow-v8-sha256-h24-tagged";
 
 }
 

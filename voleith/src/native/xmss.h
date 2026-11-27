@@ -1,8 +1,10 @@
 #ifndef XMSS_NATIVE_H
 #define XMSS_NATIVE_H
 
-/* Stateful target-sum WOTS+/XMSS. The circuit always verifies 32 levels;
- * a real height h < 32 is extended with key-derived fixed upper siblings.
+/* Stateful target-sum WOTS+/XMSS. The circuit verifies XMSS_H = 24 levels,
+ * the lifetime of SLH-DSA-128-24, and the CLI and the benchmarks fix that
+ * height. Smaller trees, which the tests use to stay fast, are extended with
+ * key-derived fixed upper siblings.
  * Reusing a leaf invalidates the one-time-signature security argument. */
 
 #include <stddef.h>
@@ -17,8 +19,7 @@ extern "C" {
 #define XMSS_NODE_BYTES 16
 #define XMSS_NODE_WORDS (XMSS_NODE_BYTES / 4)
 #define XMSS_PK_SEED_BYTES 16
-#define XMSS_H 32
-#define XMSS_H_DEFAULT 10
+#define XMSS_H 24
 #define XMSS_SUBTREE_H 16
 #define XMSS_WOTS_W 8
 #define XMSS_WOTS_LOGW 3
@@ -40,8 +41,6 @@ XMSS_STATIC_ASSERT(XMSS_WOTS_W == (1 << XMSS_WOTS_LOGW), "chain length must be 2
 XMSS_STATIC_ASSERT(XMSS_TARGET_SUM <= XMSS_WOTS_LEN * XMSS_WOTS_MAX_STEPS,
                "target sum is unreachable");
 XMSS_STATIC_ASSERT(XMSS_SUBTREE_H <= XMSS_H, "a bottom subtree must fit the tree");
-XMSS_STATIC_ASSERT(XMSS_H_DEFAULT >= 1 && XMSS_H_DEFAULT <= XMSS_H,
-               "the default real height must fit the circuit's");
 
 #define XMSS_TWEAK_CHAIN 0x00
 #define XMSS_TWEAK_TREE 0x01

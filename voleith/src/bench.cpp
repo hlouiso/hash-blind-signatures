@@ -4,11 +4,12 @@
 // Both follow the paper's methodology: a 10,240-byte document; each iteration
 // commits, has the signer sign, proves and verifies; proof generation is the
 // user's final round with witness generation included and verification is the
-// blind-signature verifier, both means over the iterations (default 10). The
-// stateless run reports key generation separately; `height` (default 10) is
-// the real XMSS tree height of the stateful run.
+// blind-signature verifier, both means over the iterations (default 10). Both
+// runs report key generation separately: the stateful key has the fixed XMSS
+// height 24, whose 2^24 leaves keygen sweeps once, and each signature resumes
+// from the top levels, as blindsig sign does from signer_cache.bin.
 //
-//   ./build/bench [--stateful] [iterations] [height]
+//   ./build/bench [--stateful] [iterations]
 //   SLH_THREADS=8 /usr/bin/time -l ./build/bench --stateless [iterations]
 #include "protocol.hpp"
 #include "slh_protocol.hpp"
@@ -26,7 +27,7 @@ using namespace voleith;
 
 namespace {
 constexpr const char* kUsage =
-    "usage: bench [--stateful] [iterations] [height]\n"
+    "usage: bench [--stateful] [iterations]\n"
     "       bench --stateless [iterations]";
 
 double now() {
@@ -56,32 +57,30 @@ void print_size(const char* label, size_t bytes) {
     std::printf("    %-38s %8.2f KiB\n", label, bytes / 1024.0);
 }
 
-void run_stateful(int runs, int height) {
-  if (uint64_t(runs) > (uint64_t(1) << height))
-    throw std::invalid_argument("iterations exceed XMSS key capacity");
-
+void run_stateful(int runs) {
   Bytes message(10 * 1024, 0x61);
-  SecretKey key;
-  PublicKey pk;
-  {
-    auto signer = Signer::generate(height);
-    key = signer.secret_key();
-    pk = signer.public_key();
-  }
+  double t = now();
+  const auto keygen = Signer::generate_cached(XMSS_H);
+  const double keygen_s = now() - t;
+  SecretKey key = keygen.secret_key();
+  const PublicKey pk = keygen.public_key();
+  const int split = keygen.subtree_height();
+  const Bytes top = keygen.top_cache();
 
   double commit_s = 0, sign_s = 0, prove_s = 0, verify_s = 0;
   size_t com_bytes = 0, sig_bytes = 0, proof_bytes = 0;
   for (int i = 0; i < runs; ++i) {
-    double t = now();
+    t = now();
     auto state = commit(message);
     commit_s += now() - t;
 
     xmss_sig response{};
     t = now();
     {
-      Signer signer(key);
-      response = signer.sign(state.commitment);
-      key = signer.secret_key();
+      auto signer = Signer::from_cache(key, split, top);
+      if (!signer) throw std::runtime_error("the key's own top levels were rejected");
+      response = signer->sign(state.commitment);
+      key = signer->secret_key();
     }
     sign_s += now() - t;
 
@@ -104,14 +103,16 @@ void run_stateful(int runs, int height) {
   std::printf(
       "  message %zu B  ·  SHAKE256, GF(2^128)  ·  XMSS h=%d  ·  "
       "WOTS+ l=%d w=%d target=%d\n",
-      message.size(), height, XMSS_WOTS_LEN, XMSS_WOTS_W, XMSS_TARGET_SUM);
-  std::printf("  VOLE trees=%zu  ·  degree=%zu  ·  grinding=%zu bits\n\n",
+      message.size(), XMSS_H, XMSS_WOTS_LEN, XMSS_WOTS_W, XMSS_TARGET_SUM);
+  std::printf("  VOLE trees=%zu  ·  degree=%zu  ·  grinding=%zu bits\n",
               kVoleTrees, kProofDegree, kGrindingBits);
+  std::printf("  one-time keygen: %.2f s for the 2^%d leaves (excluded below)\n\n",
+              keygen_s, XMSS_H);
 
   std::printf("  Average execution times (s)\n");
   std::printf("    %-38s %10.6f\n", "Commitment computation (user)",
               commit_s / runs);
-  std::printf("    %-38s %10.6f\n", "Key generation + signature (signer)",
+  std::printf("    %-38s %10.6f\n", "Signature from cached top levels",
               sign_s / runs);
   std::printf("    %-38s %10.6f\n", "Proof generation (user)", prove_s / runs);
   std::printf("    %-38s %10.6f\n\n", "Proof verification (verifier)",
@@ -191,13 +192,12 @@ int main(int argc, char** argv) try {
     else
       positional.push_back(argv[i]);
   }
-  if (positional.size() > (stateless ? 1u : 2u)) throw std::invalid_argument(kUsage);
+  if (positional.size() > 1) throw std::invalid_argument(kUsage);
   const int runs = positional.empty() ? 10 : argument(positional[0], 1000);
   if (stateless) {
     run_stateless(runs);
   } else {
-    const int height = positional.size() > 1 ? argument(positional[1], XMSS_H) : XMSS_H_DEFAULT;
-    run_stateful(runs, height);
+    run_stateful(runs);
   }
 } catch (const std::exception& e) {
   std::cerr << e.what() << '\n';

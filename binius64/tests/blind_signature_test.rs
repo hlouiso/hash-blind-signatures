@@ -37,7 +37,7 @@ fn blind_signature_roundtrip() {
         blind_sig.proof.truncate(original_len);
     }
 
-    let previous_label = b"blind-xmss-binius64-v9-salted-ghash";
+    let previous_label = b"blind-xmss-binius64-v11-sha256-salted-ghash";
     blind_sig.proof[..previous_label.len()].copy_from_slice(previous_label);
     assert!(matches!(
         verifier.verify(&blind_sig, &message),

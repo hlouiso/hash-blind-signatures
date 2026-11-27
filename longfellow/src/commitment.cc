@@ -2,6 +2,7 @@
 
 #include <cstring>
 
+#include "util/crypto.h"
 #include "util/panic.h"
 
 namespace blind_longfellow {
@@ -14,14 +15,6 @@ Elt elt_of_bytes(const Field& F, const FeBytes& b) {
   return e.value();
 }
 
-Hash hash_r(const std::array<FeBytes, kNNonce>& r) {
-  proofs::SHA256 h;
-  for (const FeBytes& r_i : r) h.Update(r_i.data(), r_i.size());
-  Hash out;
-  h.DigestData(out.data());
-  return out;
-}
-
 Elt m_hat_half_of(const Field& F, const Hash& m_hat, size_t k) {
   FeBytes half;
   std::memcpy(half.data(), m_hat.data() + k * kFeBytes, kFeBytes);
@@ -30,10 +23,45 @@ Elt m_hat_half_of(const Field& F, const Hash& m_hat, size_t k) {
 
 }
 
+Tag tag_block(const char* label) {
+  const size_t n = std::strlen(label);
+  proofs::check(n <= 48, "tag label too long");
+  Tag t;
+  t.fill(0xFF);
+  std::memcpy(t.data(), label, n);
+  return t;
+}
+
+Hash tagged(const Tag& tag, const uint8_t* data, size_t len) {
+  proofs::SHA256 h;
+  h.Update(tag.data(), tag.size());
+  h.Update(data, len);
+  Hash out;
+  h.DigestData(out.data());
+  return out;
+}
+
+Midstate tag_midstate(const Tag& tag) { return sha256_midstate(tag.data()); }
+
+const Tag kXmssTagMessage = tag_block("blind-xmss/sha256/v1/message-hash");
+const Tag kXmssTagNonce = tag_block("blind-xmss/sha256/v1/commitment-y");
+const Tag kXmssTagDigest = tag_block("blind-xmss/sha256/v1/commitment-d");
+
+Hash hm_message_hash(const Bytes& msg) {
+  return tagged(kXmssTagMessage, msg.data(), msg.size());
+}
+
+Hash hm_nonce_hash(const std::array<FeBytes, kNNonce>& r) {
+  uint8_t buf[kNNonce * kFeBytes];
+  for (size_t i = 0; i < kNNonce; ++i)
+    std::memcpy(buf + i * kFeBytes, r[i].data(), kFeBytes);
+  return tagged(kXmssTagNonce, buf, sizeof(buf));
+}
+
 HmCommitment hm_commit(const Field& F, const Bytes& msg,
                        const std::array<std::array<FeBytes, kNNonce>, kNLines>& a,
                        const std::array<FeBytes, kNNonce>& r) {
-  const Hash m_hat = sha256(msg);
+  const Hash m_hat = hm_message_hash(msg);
 
   HmCommitment com;
   com.a = a;
@@ -45,7 +73,7 @@ HmCommitment hm_commit(const Field& F, const Bytes& msg,
     const Elt b_fe = F.addf(m_hat_half_of(F, m_hat, k), sum);
     F.to_bytes_field(com.b[k].data(), b_fe);
   }
-  com.y = hash_r(r);
+  com.y = hm_nonce_hash(r);
   return com;
 }
 
@@ -66,9 +94,9 @@ std::pair<HmCommitment, CommitmentOpening> sample_commitment(const Field& F,
 bool verify_hm_opening(const Field& F, const HmCommitment& com,
                        const Bytes& msg,
                        const std::array<FeBytes, kNNonce>& r) {
-  if (hash_r(r) != com.y) return false;
+  if (hm_nonce_hash(r) != com.y) return false;
 
-  const Hash m_hat = sha256(msg);
+  const Hash m_hat = hm_message_hash(msg);
   for (size_t k = 0; k < kNLines; ++k) {
     Elt sum = F.zero();
     for (size_t i = 0; i < kNNonce; ++i) {
@@ -95,7 +123,8 @@ Bytes hm_com_digest_preimage(const HmCommitment& com) {
 }
 
 Hash hm_com_digest(const HmCommitment& com) {
-  return sha256(hm_com_digest_preimage(com));
+  const Bytes pre = hm_com_digest_preimage(com);
+  return tagged(kXmssTagDigest, pre.data(), pre.size());
 }
 
 }

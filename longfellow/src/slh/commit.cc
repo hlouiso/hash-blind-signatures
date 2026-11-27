@@ -9,24 +9,6 @@ namespace blind_longfellow {
 namespace slh {
 namespace {
 
-Tag tag_block(const char* label) {
-  const size_t n = std::strlen(label);
-  proofs::check(n <= 48, "tag label too long");
-  Tag t;
-  t.fill(0xFF);
-  std::memcpy(t.data(), label, n);
-  return t;
-}
-
-Hash tagged(const Tag& tag, const uint8_t* data, size_t len) {
-  proofs::SHA256 h;
-  h.Update(tag.data(), tag.size());
-  h.Update(data, len);
-  Hash out;
-  h.DigestData(out.data());
-  return out;
-}
-
 Elt elt_of_bytes(const Field& F, const FeBytes& b) {
   auto e = F.of_bytes_field(b.data());
   proofs::check(e.has_value(), "of_bytes_field failed");
@@ -52,8 +34,6 @@ Elt line_sum(const Field& F, const std::array<FeBytes, kNNonce>& a_k,
 const Tag kTagMessage = tag_block("blind-slh-dsa/sha256/v1/message-hash");
 const Tag kTagNonce = tag_block("blind-slh-dsa/sha256/v1/commitment-y");
 const Tag kTagDigest = tag_block("blind-slh-dsa/sha256/v1/commitment-d");
-
-State tag_midstate(const Tag& tag) { return sha256_block_midstate(tag.data()); }
 
 Hash message_hash(const uint8_t* msg, size_t len) {
   return tagged(kTagMessage, msg, len);

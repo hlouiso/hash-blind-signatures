@@ -20,7 +20,7 @@ using Commitment = std::array<uint8_t, 256>;
 struct SecretKey {
   std::array<uint8_t, 32> seed;
   std::array<uint8_t, 16> public_seed;
-  uint8_t height = XMSS_H_DEFAULT;
+  uint8_t height = XMSS_H;
   uint64_t next_leaf = 0;
 };
 
@@ -33,9 +33,11 @@ class Signer {
   explicit Signer(SecretKey key);
   // Splits the tree at `subtree_h`, so that top_cache() holds the levels above.
   Signer(SecretKey key, int subtree_h);
-  static Signer generate(int height = XMSS_H_DEFAULT);
+  // The CLI and the benchmarks use height XMSS_H; the tests use smaller trees,
+  // which the circuit completes with seed-derived siblings.
+  static Signer generate(int height);
   // Like generate, split at xmss_cache_split_height for a stored top cache.
-  static Signer generate_cached(int height = XMSS_H_DEFAULT);
+  static Signer generate_cached(int height);
   // Resumes a signer from top_cache() without sweeping the leaves; nullopt
   // unless the nodes fit (key.height, subtree_h) and form one tree.
   static std::optional<Signer> from_cache(SecretKey key, int subtree_h,

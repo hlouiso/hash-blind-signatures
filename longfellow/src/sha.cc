@@ -102,21 +102,22 @@ Bytes build_tree_prefix(const Bytes& param) {
   return m;
 }
 
-Midstate tree_midstate(const Bytes& param) {
-
+Midstate sha256_midstate(const uint8_t block[64]) {
   static const uint32_t kIV[8] = {0x6a09e667u, 0xbb67ae85u, 0x3c6ef372u,
                                   0xa54ff53au, 0x510e527fu, 0x9b05688cu,
                                   0x1f83d9abu, 0x5be0cd19u};
-  const Bytes prefix = build_tree_prefix(param);
   uint32_t in[16];
-  for (size_t i = 0; i < 16; ++i)
-    in[i] = proofs::SHA256_ru32be(prefix.data() + 4 * i);
+  for (size_t i = 0; i < 16; ++i) in[i] = proofs::SHA256_ru32be(block + 4 * i);
 
   uint32_t outw[48], oute[64], outa[64];
   Midstate h1{};
   proofs::FlatSHA256Witness::transform_and_witness_block(in, kIV, outw, oute,
                                                          outa, h1.data());
   return h1;
+}
+
+Midstate tree_midstate(const Bytes& param) {
+  return sha256_midstate(build_tree_prefix(param).data());
 }
 
 Bytes build_tree_hash(const Bytes& param, const Node& left, const Node& right,

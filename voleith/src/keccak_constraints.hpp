@@ -53,18 +53,6 @@ void add_lane(
   }
 }
 
-template <secpar S, bool flag, size_t max_deg, size_t deg1, size_t deg2,
-          size_t deg3>
-  requires(deg1 <= max_deg && deg2 <= max_deg && deg3 <= max_deg)
-void mul_lane(
-    quicksilver_gfsecpar<quicksilver_state<S, flag, max_deg>, deg1>* lane_out,
-    quicksilver_gfsecpar<quicksilver_state<S, flag, max_deg>, deg2>* lane_a,
-    quicksilver_gfsecpar<quicksilver_state<S, flag, max_deg>, deg3>* lane_b) {
-  for (size_t i = 0; i < VOLEKECCAK_W; i++) {
-    lane_out[i] = lane_a[i] * lane_b[i];
-  }
-}
-
 template <secpar S, bool flag, size_t max_deg, size_t deg1, size_t deg2>
   requires(deg1 <= max_deg && deg2 <= max_deg)
 void rot_lane(
@@ -99,54 +87,29 @@ void keccak_forward(QS* qs_state, size_t round_idx,
     add_lane(get_lane(D, 0, x), get_lane(C, 0, (x + 4) % 5), C_rot);
   }
 
-  for (size_t x = 0; x < 5; x++) {
-    size_t yidx = (x * 3) % 5;
-    size_t xidx = 0;
-    for (size_t y = 0; y < 5; y++) {
-      add_lane(get_lane(state_in, xidx, yidx), get_lane(state_in, xidx, yidx),
-               get_lane(D, 0, yidx));
-      yidx = (yidx + 1) % 5;
-      xidx++;
-    }
-  }
-
+  // Apply theta as each lane is rotated and moved by rho/pi. The state is
+  // row-major; ROTATION_OFFSET is indexed by (column, row).
   quicksilver_gfsecpar<QS, deg_in> B_fwd[VOLEKECCAK_B];
-  for (size_t x = 0; x < 5; x++) {
-    size_t yidx = (x * 3) % 5;
-    size_t xidx = 0;
-    for (size_t y = 0; y < 5; y++) {
-      quicksilver_gfsecpar<QS, deg_in> state_rot[VOLEKECCAK_W];
-      rot_lane(state_rot, get_lane(state_in, xidx, yidx),
-               OC::ROTATION_OFFSET[((x * 3 * 5) + xidx * 5 + y) % 25]);
-      memcpy(get_lane(B_fwd, x, y), state_rot,
-             sizeof(quicksilver_gfsecpar<QS, deg_in>) * VOLEKECCAK_W);
-      yidx = (yidx + 1) % 5;
-      xidx++;
+  for (size_t row = 0; row < 5; ++row) {
+    for (size_t col = 0; col < 5; ++col) {
+      const auto* in = get_lane(state_in, row, col);
+      const auto* delta = get_lane(D, 0, col);
+      auto* out = get_lane(B_fwd, (2 * col + 3 * row) % 5, row);
+      const auto rot = OC::ROTATION_OFFSET[5 * col + row];
+      for (size_t z = 0; z < 64; ++z) out[(z + rot) % 64] = in[z] + delta[z];
     }
   }
 
-  uint8_t one_byte = 1;
-  quicksilver_gfsecpar<QS, 0> neg_one[VOLEKECCAK_W];
-  for (size_t i = 0; i < VOLEKECCAK_W; i++) {
-    neg_one[i] = load_const_1_bit_and_combine(qs_state, &one_byte, 0);
-  }
-  quicksilver_gfsecpar<QS, deg_in> neg_B[VOLEKECCAK_W];
-  for (size_t x = 0; x < 5; x++) {
-    for (size_t y = 0; y < 5; y++) {
-      if ((x * 5 + y) * 64 >= output_bits) continue;
-      add_lane(get_lane(neg_B, 0, 0), get_lane(B_fwd, x, (y + 1) % 5),
-               get_lane(neg_one, 0, 0));
-
-      mul_lane(get_lane(state_out, x, y), get_lane(neg_B, 0, 0),
-               get_lane(B_fwd, x, (y + 2) % 5));
-    }
-  }
-
-  for (size_t x = 0; x < 5; x++) {
-    for (size_t y = 0; y < 5; y++) {
-      if ((x * 5 + y) * 64 >= output_bits) continue;
-      add_lane(get_lane(state_out, x, y), get_lane(state_out, x, y),
-               get_lane(B_fwd, x, y));
+  const uint8_t one_byte = 1;
+  const auto one = load_const_1_bit_and_combine(qs_state, &one_byte, 0);
+  for (size_t row = 0; row < 5; ++row) {
+    for (size_t col = 0; col < 5; ++col) {
+      if ((5 * row + col) * 64 >= output_bits) continue;
+      const auto* a = get_lane(B_fwd, row, col);
+      const auto* b = get_lane(B_fwd, row, (col + 1) % 5);
+      const auto* c = get_lane(B_fwd, row, (col + 2) % 5);
+      auto* out = get_lane(state_out, row, col);
+      for (size_t z = 0; z < 64; ++z) out[z] = (b[z] + one) * c[z] + a[z];
     }
   }
 
@@ -215,29 +178,14 @@ void keccak_backward(QS* qs_state, size_t round_idx,
       const auto* b2 = get_lane(state_in, row, (x + 2) % 5);
       const auto* b3 = get_lane(state_in, row, (x + 3) % 5);
       const auto* b4 = get_lane(state_in, row, (x + 4) % 5);
-      auto* out = get_lane(state_out, row, x);
-      for (size_t z = 0; z < VOLEKECCAK_W; ++z) {
+      // Undo pi and rho while writing inverse chi, before inverse theta.
+      const size_t src_row = x, src_col = (3 * row + x) % 5;
+      const size_t rot = OC::ROTATION_OFFSET[5 * src_col + src_row];
+      auto* out = get_lane(state_out, src_row, src_col);
+      for (size_t z = 0; z < 64; ++z) {
         const auto inner = (b3[z] + one) * b4[z] + b2[z];
-        out[z] = inner * (b1[z] + one) + b0[z];
+        out[(z + 64 - rot) % 64] = inner * (b1[z] + one) + b0[z];
       }
-    }
-  }
-
-  quicksilver_gfsecpar<QS, deg_out> state_tmp[VOLEKECCAK_B];
-  memcpy(state_tmp, state_out,
-         sizeof(quicksilver_gfsecpar<QS, deg_out>) * VOLEKECCAK_B);
-  for (size_t x = 0; x < 5; x++) {
-    size_t yidx = (x * 3) % 5;
-    size_t xidx = 0;
-    for (size_t y = 0; y < 5; y++) {
-      quicksilver_gfsecpar<QS, deg_out> state_tmp_rot[VOLEKECCAK_W];
-      rot_lane(
-          state_tmp_rot, get_lane(state_tmp, x, y),
-          (VOLEKECCAK_W - OC::ROTATION_OFFSET[((x * 3 * 5) + y * 5 + y) % 25]));
-      memcpy(get_lane(state_out, xidx, yidx), state_tmp_rot,
-             sizeof(quicksilver_gfsecpar<QS, deg_out>) * VOLEKECCAK_W);
-      yidx = (yidx + 1) % 5;
-      xidx++;
     }
   }
 

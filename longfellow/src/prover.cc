@@ -40,7 +40,7 @@ using proofs::Transcript;
 using proofs::ZkProof;
 using proofs::ZkProver;
 
-using Encoder = proofs::BitPluckerEncoder<Field, kPluckerSize>;
+using Encoder = proofs::BitPluckerEncoder<Field, kXmssPluckerSize>;
 
 static void push_bytes(DenseFiller<Field>& fill, const Field& F,
                        const uint8_t* b, size_t n) {

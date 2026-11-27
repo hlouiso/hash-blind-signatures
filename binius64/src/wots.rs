@@ -1,6 +1,7 @@
 //! Target-sum WOTS+ compatible with the Binius64 circuit. Chain starts are
-//! derived by a keyed XOF from sk_seed and epoch; pk_seed is the hash domain
-//! parameter.
+//! derived from sk_seed as the Longfellow implementation derives them
+//! (`longfellow/src/xmss.cc`), so one seed gives one key in both; pk_seed is
+//! the hash domain parameter.
 
 use rand::Rng;
 
@@ -8,6 +9,7 @@ use crate::hashes::{
     CHAIN_LENGTH, DIGEST_LEN, Digest, PUBLIC_PARAM_LEN, PublicParam, V, iterate_hash,
     recover_public_key, wots_public_key_hash,
 };
+use crate::slh::native::hmac_sha256;
 
 pub const N: usize = DIGEST_LEN;
 
@@ -21,7 +23,8 @@ pub const PK_SEED_BYTES: usize = PUBLIC_PARAM_LEN;
 
 pub const SK_SEED_BYTES: usize = 32;
 
-const WOTS_SK_DOMAIN: &[u8] = b"blind-xmss-binius64/wots-sk";
+/// Longfellow's label, shared so both implementations derive the same keys.
+const WOTS_PRF_LABEL: &[u8] = b"blind-xmss-longfellow/wots/v1";
 
 pub fn build_wots_domain_param(pk_seed: &[u8; PK_SEED_BYTES]) -> PublicParam {
     *pk_seed
@@ -35,16 +38,35 @@ pub fn generate_wots_secret_key(rng: &mut impl Rng) -> [Digest; LEN] {
     })
 }
 
-pub fn derive_wots_secret_key(sk_seed: &[u8; SK_SEED_BYTES], epoch: u32) -> [Digest; LEN] {
-    let mut hasher = blake3::Hasher::new_keyed(sk_seed);
-    hasher.update(WOTS_SK_DOMAIN);
-    hasher.update(&epoch.to_be_bytes());
-    let mut xof = hasher.finalize_xof();
-    std::array::from_fn(|_| {
-        let mut val = [0u8; N];
-        xof.fill(&mut val);
-        val
+/// The key of the chain-start PRF: HMAC-SHA-256(sk_seed, label).
+pub fn derive_wots_prf_key(sk_seed: &[u8; SK_SEED_BYTES]) -> [u8; 32] {
+    hmac_sha256(sk_seed, &[WOTS_PRF_LABEL])
+}
+
+/// Chain start i at `epoch`: HMAC-SHA-256(prf_key, pk_seed || epoch || i),
+/// truncated, with the integers little-endian.
+pub fn derive_wots_secret_key_with(
+    prf_key: &[u8; 32],
+    pk_seed: &[u8; PK_SEED_BYTES],
+    epoch: u32,
+) -> [Digest; LEN] {
+    std::array::from_fn(|i| {
+        let out = hmac_sha256(
+            prf_key,
+            &[pk_seed, &epoch.to_le_bytes(), &(i as u32).to_le_bytes()],
+        );
+        out[..N]
+            .try_into()
+            .expect("a digest is a prefix of the output")
     })
+}
+
+pub fn derive_wots_secret_key(
+    sk_seed: &[u8; SK_SEED_BYTES],
+    pk_seed: &[u8; PK_SEED_BYTES],
+    epoch: u32,
+) -> [Digest; LEN] {
+    derive_wots_secret_key_with(&derive_wots_prf_key(sk_seed), pk_seed, epoch)
 }
 
 pub fn compute_wots_public_key(
@@ -101,17 +123,22 @@ mod tests {
     fn derived_secret_keys_are_seed_and_epoch_bound() {
         let seed = [7u8; SK_SEED_BYTES];
         let other = [8u8; SK_SEED_BYTES];
+        let pk = [1u8; PK_SEED_BYTES];
         assert_eq!(
-            derive_wots_secret_key(&seed, 3),
-            derive_wots_secret_key(&seed, 3)
+            derive_wots_secret_key(&seed, &pk, 3),
+            derive_wots_secret_key(&seed, &pk, 3)
         );
         assert_ne!(
-            derive_wots_secret_key(&seed, 3),
-            derive_wots_secret_key(&seed, 4)
+            derive_wots_secret_key(&seed, &pk, 3),
+            derive_wots_secret_key(&seed, &pk, 4)
         );
         assert_ne!(
-            derive_wots_secret_key(&seed, 3),
-            derive_wots_secret_key(&other, 3)
+            derive_wots_secret_key(&seed, &pk, 3),
+            derive_wots_secret_key(&other, &pk, 3)
+        );
+        assert_ne!(
+            derive_wots_secret_key(&seed, &pk, 3),
+            derive_wots_secret_key(&seed, &[2u8; PK_SEED_BYTES], 3)
         );
     }
 

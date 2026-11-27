@@ -250,7 +250,7 @@ mod tests {
 
     #[test]
     fn xmss_sig_wire_size_is_minimal() {
-        assert_eq!(XMSS_SIG_BYTES, 1212);
+        assert_eq!(XMSS_SIG_BYTES, 1084);
         let (_, sig, _) = signed_fixture(7);
         assert_eq!(write_xmss_sig(&sig).len(), XMSS_SIG_BYTES);
     }
@@ -347,18 +347,21 @@ mod tests {
     #[test]
     fn one_signer_key_and_pubkey_are_57_and_33_bytes() {
         let (keys, pk_seed) = dummy_keys(1);
-        assert_eq!(write_signer_keys(&keys, &pk_seed, 32).len(), 57);
-        assert_eq!(write_signer_pub(&[[9u8; N]], &pk_seed, 32).len(), 33);
+        assert_eq!(write_signer_keys(&keys, &pk_seed, LOG_LIFETIME).len(), 57);
+        assert_eq!(
+            write_signer_pub(&[[9u8; N]], &pk_seed, LOG_LIFETIME).len(),
+            33
+        );
     }
 
     #[test]
     fn signer_key_roundtrips_at_every_signer_count() {
         for n in [1usize, 2, 10] {
             let (keys, pk_seed) = dummy_keys(n);
-            let bytes = write_signer_keys(&keys, &pk_seed, 32);
+            let bytes = write_signer_keys(&keys, &pk_seed, LOG_LIFETIME);
             let (got, got_seed, got_h) = read_signer_keys(&bytes).expect("read failed");
             assert_eq!(got_seed, pk_seed);
-            assert_eq!(got_h, 32, "the height is recovered");
+            assert_eq!(got_h, LOG_LIFETIME, "the height is recovered");
             assert_eq!(got.len(), n, "signer count is recovered from the length");
             for (a, b) in got.iter().zip(&keys) {
                 assert_eq!(a.sk_seed, b.sk_seed);
@@ -366,18 +369,18 @@ mod tests {
             }
 
             let roots: Vec<[u8; N]> = (0..n).map(|i| [i as u8 + 1; N]).collect();
-            let pub_bytes = write_signer_pub(&roots, &pk_seed, 32);
+            let pub_bytes = write_signer_pub(&roots, &pk_seed, LOG_LIFETIME);
             let (got_roots, got_seed, got_h) = read_signer_pub(&pub_bytes).expect("read failed");
             assert_eq!(got_roots, roots);
             assert_eq!(got_seed, pk_seed);
-            assert_eq!(got_h, 32, "the height is part of the public key");
+            assert_eq!(got_h, LOG_LIFETIME, "the height is part of the public key");
         }
     }
 
     #[test]
     fn key_files_reject_lengths_that_name_no_signer_count() {
         let (keys, pk_seed) = dummy_keys(2);
-        let bytes = write_signer_keys(&keys, &pk_seed, 32);
+        let bytes = write_signer_keys(&keys, &pk_seed, LOG_LIFETIME);
         assert!(read_signer_keys(&bytes[..bytes.len() - 1]).is_none());
         assert!(read_signer_keys(&[]).is_none());
         assert!(read_signer_keys(&pk_seed).is_none());
@@ -385,7 +388,7 @@ mod tests {
         let pub_bytes = write_signer_pub(&[[1u8; N], [2u8; N]], &pk_seed, 10);
         assert!(read_signer_pub(&pub_bytes[..pub_bytes.len() - 1]).is_none());
         assert!(read_signer_pub(&pk_seed).is_none());
-        for bad_height in [0u8, 33] {
+        for bad_height in [0u8, LOG_LIFETIME as u8 + 1] {
             let mut bad = pub_bytes.clone();
             *bad.last_mut().unwrap() = bad_height;
             assert!(

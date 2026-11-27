@@ -13,7 +13,7 @@ pub use verifier::Verifier;
 
 pub(crate) const FS_NONCE_BYTES: usize = 32;
 
-pub(crate) const PROOF_LABEL: &[u8] = b"blind-xmss-binius64-v10-salted-ghash";
+pub(crate) const PROOF_LABEL: &[u8] = b"blind-xmss-binius64-v12-sha256-salted-ghash";
 
 pub struct BlindSignature {
     pub proof: Vec<u8>,

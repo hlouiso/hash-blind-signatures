@@ -4,7 +4,7 @@ Three implementations of the hash-based **blind (multi)signature** scheme
 described in the accompanying paper.
 
 All three share a **Halevi–Micali statistically-hiding commitment** over
-GF(2¹²⁸) and one **target-sum WOTS+/XMSS** parameter set at tree height 10, and prove
+GF(2¹²⁸) and one **target-sum WOTS+/XMSS** parameter set at tree height 24, and prove
 the same statement: that the user holds a valid XMSS signature on a commitment
 opening to the message. The commitment, the signature and the leaf index all
 stay secret, so the issued signature is unlinkable to the signing session. The
@@ -12,7 +12,7 @@ instantiations differ in the proof system underneath:
 
 | Directory | Proof system | Hash | Language | Notes |
 |---|---|---|---|---|
-| [`binius64/`](binius64/) | [Binius64](https://github.com/binius-zk/binius64) | BLAKE3 | Rust | Fastest; also implements the blind **multi-signature** |
+| [`binius64/`](binius64/) | [Binius64](https://github.com/binius-zk/binius64) | SHA-256 | Rust | Fastest; also implements the blind **multi-signature** |
 | [`longfellow/`](longfellow/) | [Longfellow ZK](https://github.com/google/longfellow-zk) | SHA-256 | C++ | Smallest proofs |
 | [`voleith/`](voleith/) | [VOLE-in-the-head](https://eprint.iacr.org/2023/996) | SHAKE256 | C/C++ | |
 
@@ -52,10 +52,8 @@ blindsig verify <msg_file>   # verifier: [PASS]
 - `--stateless` uses SLH-DSA-128-24 (SP 800-230): SHAKE in `voleith/`, SHA2 in
   the other two. `sign` writes `slh_sig.bin` and never rewrites the key.
 
-`--height <h>` sets the *real* XMSS tree height at stateful `keygen` (default 10, max
-32), i.e. how many one-time signatures the key can issue. The circuit climbs 32
-levels at any height, so nothing else about the session changes.
-Raising it costs keygen time and security bits.
+The XMSS tree has the fixed height 24: a key issues 2^24 one-time signatures,
+the lifetime of SLH-DSA-128-24.
 
 `-d, --dir <path>` keeps the artefacts out of the working directory.
 `signer_pub.bin` is a trust anchor and is not carried by the signature: it has
@@ -79,9 +77,9 @@ One command per implementation reproduces every figure that implementation contr
 
 | Directory | Command | Also produces |
 |---|---|---|
-| `binius64/` | `RUSTFLAGS="-C target-cpu=native" RAYON_NUM_THREADS=8 BENCH_MULTI_ITERS=10 cargo bench --bench bench --locked` | the multi-signature sweep, n = 1…32; reports the upstream capacity limit at n = 64 |
+| `binius64/` | `RUSTFLAGS="-C target-cpu=native" RAYON_NUM_THREADS=8 BENCH_MULTI_ITERS=10 cargo bench --bench bench --locked` | the multi-signature sweep |
 | `longfellow/` | `./build/bench [iters]` | |
-| `voleith/` | `./build/bench [iters] [height]` | defaults: 10 iterations, height 10 |
+| `voleith/` | `./build/bench [iters]` | default: 10 iterations |
 
 The same binaries benchmark the stateless variant with `--stateless`, as in
 `blindsig keygen`: `./build/bench --stateless [iters]` in `longfellow/` and

@@ -179,5 +179,8 @@ if(BUILD_TESTING)
   find_package(Python3 COMPONENTS Interpreter REQUIRED)
   add_test(NAME cli COMMAND ${Python3_EXECUTABLE}
     ${CMAKE_CURRENT_SOURCE_DIR}/tests/cli_test.py $<TARGET_FILE:blindsig>)
-  set_tests_properties(circuit protocol cli PROPERTIES TIMEOUT 1200)
+  set_tests_properties(circuit protocol PROPERTIES TIMEOUT 1200)
+  # One XMSS keygen of height 24, a few minutes of SHAKE256 on 8 ARM cores and
+  # much longer with the x86 runner's portable Keccak, hence the label.
+  set_tests_properties(cli PROPERTIES TIMEOUT 2400 LABELS slow)
 endif()

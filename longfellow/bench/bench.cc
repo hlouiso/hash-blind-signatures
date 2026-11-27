@@ -38,7 +38,6 @@
 
 namespace blind_longfellow {
 
-constexpr size_t kBenchXmssH = 10;
 namespace {
 
 using Clock = std::chrono::steady_clock;
@@ -75,19 +74,22 @@ int run(int iters) {
   size_t pk_bytes = 0, sk_bytes = 0, com_bytes = 0, sig_bytes = 0, proof_bytes = 0;
   bool all_ok = true;
 
+  // One key of the fixed height: keygen sweeps its 2^24 leaves once (excluded
+  // below), and each signature resumes from the top levels, as blindsig sign
+  // does from signer_cache.bin.
+  SignerKey key;
+  DeterministicRng krng(0xB0A7);
+  krng.fill_bytes(key.sk_seed, kSkSeedBytes);
+  krng.fill_bytes(key.pk_seed.data(), key.pk_seed.size());
+  key.height = static_cast<uint8_t>(kXmssH);
+  key.next_leaf = 0;
+  t0 = Clock::now();
+  const XmssKeyPair full = XmssKeyPair::generate_from_seed_split(
+      key.sk_seed, key.pk_seed, kXmssH, cache_split_height(kXmssH));
+  const double keygen_s = s_since(t0);
+  const SignerPub pub{full.public_key(), key.pk_seed, key.height};
+
   for (int it = 0; it < iters && all_ok; ++it) {
-
-    SignerKey key;
-    DeterministicRng krng(0xB0A7 + it);
-    krng.fill_bytes(key.sk_seed, kSkSeedBytes);
-    krng.fill_bytes(key.pk_seed.data(), key.pk_seed.size());
-    key.height = static_cast<uint8_t>(kBenchXmssH);
-    key.next_leaf = 0;
-    const SignerPub pub{
-        XmssKeyPair::generate_from_seed(key.sk_seed, key.pk_seed, kBenchXmssH)
-            .public_key(),
-        key.pk_seed, key.height};
-
     DeterministicRng urng(0x1000 + it);
     UserState state;
     t0 = Clock::now();
@@ -95,7 +97,10 @@ int run(int iters) {
     commit_s += s_since(t0);
 
     t0 = Clock::now();
-    const auto xmss_sig = signer_sign(key, com);
+    auto kp = XmssKeyPair::from_top_levels(key.sk_seed, key.pk_seed, kXmssH,
+                                           full.subtree_height(), full.top_levels());
+    const auto xmss_sig =
+        kp ? signer_sign_with(*kp, key, com) : std::optional<XmssSignature>{};
     sign_s += s_since(t0);
     if (!xmss_sig.has_value()) { all_ok = false; break; }
 
@@ -112,7 +117,7 @@ int run(int iters) {
     sk_bytes = write_signer_key(key).size();
     com_bytes = write_commitment(com).size();
     sig_bytes = write_xmss_sig(*xmss_sig).size();
-    proof_bytes = write_blind_sig(bsig).size();
+    proof_bytes += write_blind_sig(bsig).size();
   }
 
   const double n = iters;
@@ -123,15 +128,22 @@ int run(int iters) {
               all_ok ? "all verified" : "*** FAILED ***");
   std::printf("  message %zu B  ·  SHA-256, GF(2^128)  ·  XMSS h=%zu  ·  "
               "WOTS+ l=%zu w=%zu target=%llu\n",
-              message.size(), kBenchXmssH, kLen, kW,
+              message.size(), kXmssH, kLen, kW,
               (unsigned long long)xmss_wots_spec().target_sum);
   std::printf("  one-time setup: circuit %.2f s (shared by prover and verifier,"
-              " excluded below)\n\n",
+              " excluded below)\n",
               circuit_s);
+  std::printf("  one-time keygen: %.2f s for the 2^%zu leaves (excluded below)\n",
+              keygen_s, kXmssH);
+  const slh::LigeroLayout lig = slh::slh_ligero_layout(*circuit);
+  std::printf("  circuit: %zu inputs (%zu public); Ligero: rate 1/%zu, nreq %zu, "
+              "witnesses %zu, block %zu, block_enc %zu, dblock %zu, rows %zu\n\n",
+              circuit->ninputs, circuit->npub_in, lig.rateinv, lig.nreq,
+              lig.witnesses, lig.block, lig.block_enc, lig.dblock, lig.nrow);
 
   std::printf("  Average execution times (s)\n");
   std::printf("    %-38s %10.4f\n", "Commitment computation (user)", commit_s);
-  std::printf("    %-38s %10.4f\n", "Key generation + signature (signer)",
+  std::printf("    %-38s %10.4f\n", "Signature from cached top levels",
               sign_s);
   std::printf("    %-38s %10.4f\n", "Proof generation (user)", prove_s);
   std::printf("    %-38s %10.4f\n\n", "Proof verification (verifier)", verify_s);
@@ -141,7 +153,7 @@ int run(int iters) {
   print_size("Secret key of S (sk)", sk_bytes);
   print_size("Commitment M", com_bytes);
   print_size("Signature of S", sig_bytes);
-  print_size("Final signature (NIZK proof)", proof_bytes);
+  print_size("Final signature (mean NIZK proof)", proof_bytes / iters);
 
   if (!all_ok) {
     std::fprintf(stderr, "\nbench: the protocol did not complete\n");

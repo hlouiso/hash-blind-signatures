@@ -1,11 +1,14 @@
 //! Multi-signer XMSS verification over one secret digest and one secret epoch.
+//! The signers share pk_seed, so one hasher, with its epoch bytes and tree
+//! midstate, serves all of them.
 
-use binius_circuits::hash_based_sig::xmss::{XmssSignatureWires, circuit_xmss_verify};
 use binius_core::word::Word;
 use binius_frontend::{CircuitBuilder, Wire, WitnessFiller};
 
 use crate::gadgets::assert_epoch_below_height;
-use crate::hashes::{DIGEST_WIRES, MESSAGE_WIRES, PUBLIC_PARAM_WIRES};
+use crate::hashes::{DIGEST_WIRES, MESSAGE_WORDS, PUBLIC_PARAM_WIRES};
+use crate::ts_xmss::hashing::XmssHasher;
+use crate::ts_xmss::xmss::{XmssSignatureWires, circuit_xmss_verify};
 use crate::xmss::XmssSignature;
 
 pub struct XmssMultisigVerifyGadget {
@@ -17,27 +20,20 @@ impl XmssMultisigVerifyGadget {
     pub fn new(
         b: &CircuitBuilder,
         domain_param_wires: &[Wire; PUBLIC_PARAM_WIRES],
-        signed_msg_wires: &[Wire; MESSAGE_WIRES],
+        signed_msg_words: &[Wire; MESSAGE_WORDS],
         epoch_wire: Wire,
         epoch_mask_wire: Wire,
         roots: &[[Wire; DIGEST_WIRES]],
     ) -> Self {
+        assert!(!roots.is_empty(), "at least one XMSS signer is required");
         assert_epoch_below_height(b, epoch_wire, epoch_mask_wire);
 
+        let h = XmssHasher::new(b, domain_param_wires, epoch_wire);
         let per_signer = roots
             .iter()
-            .enumerate()
-            .map(|(i, root)| {
-                let b = b.subcircuit(format!("signer[{i}]"));
-                let signature = XmssSignatureWires::new_witness(&b);
-                circuit_xmss_verify(
-                    &b,
-                    domain_param_wires,
-                    root,
-                    signed_msg_wires,
-                    epoch_wire,
-                    &signature,
-                );
+            .map(|root| {
+                let signature = XmssSignatureWires::new_witness(b);
+                circuit_xmss_verify(&h, domain_param_wires, root, signed_msg_words, &signature);
                 signature
             })
             .collect();
@@ -72,7 +68,7 @@ impl XmssMultisigVerifyGadget {
         w[self.epoch] = Word::from_u64(epoch as u64);
 
         for (wires, sig) in self.per_signer.iter().zip(signatures) {
-            wires.populate(w, &sig.to_upstream());
+            wires.populate(w, &sig.to_signature());
         }
     }
 }

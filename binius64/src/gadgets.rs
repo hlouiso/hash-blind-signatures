@@ -1,18 +1,24 @@
-//! The circuit proves y = BLAKE3(r), m̂_k = Σ_i a_{k,i}r_i + b_k, and an
-//! XMSS signature on d = BLAKE3(a || b || y). The public inputs are m̂,
-//! pk_seed, the XMSS root and the epoch mask of the real height; the
-//! commitment opening and epoch are secret. GHASH limbs and circuit words are
-//! packed little-endian.
+//! The circuit proves y = H_com(r), m̂_k = Σ_i a_{k,i}r_i + b_k, and an XMSS
+//! signature on d = H_sig(a || b || y), with the tagged SHA-256 hashes of
+//! `crate::commitment`. The public inputs are m̂, pk_seed, the XMSS root and
+//! the epoch mask of the real height; the commitment opening and epoch are
+//! secret. GHASH limbs are packed little-endian; pk_seed and the root are
+//! packed eight big-endian bytes per word, the layout of `crate::ts_xmss`.
 
-use binius_circuits::blake3::blake3_fixed;
-use binius_circuits::hash_based_sig::xmss::{XmssSignatureWires, circuit_xmss_verify};
+use std::array;
+
+use binius_circuits::bytes::swap_bytes_32;
+use binius_circuits::sha256::{State, sha256_compress};
 use binius_core::word::Word;
 use binius_frontend::{CircuitBuilder, Wire, WitnessFiller};
 
 use crate::commitment::{
-    COMMITMENT_BYTES, HmCommitment, N_DIGEST_WORDS, N_FE, N_FE_WORDS, N_LINES, N_NONCE,
+    CommitTags, GhashElement, HmCommitment, N_DIGEST_WORDS, N_FE, N_FE_WORDS, N_LINES, N_NONCE,
+    N_Y, TAG_BYTES, XMSS_TAGS, tag_midstate,
 };
-use crate::hashes::{DIGEST_WIRES, LOG_LIFETIME, MESSAGE_WIRES, PUBLIC_PARAM_WIRES, blake3_256};
+use crate::hashes::{DIGEST_LEN, DIGEST_WIRES, LOG_LIFETIME, MESSAGE_WORDS, PUBLIC_PARAM_WIRES};
+use crate::ts_xmss::hashing::{XmssHasher, packed_words};
+use crate::ts_xmss::xmss::{XmssSignatureWires, circuit_xmss_verify};
 use crate::wots::{PK_SEED_BYTES, build_wots_domain_param};
 use crate::xmss::XmssSignature;
 
@@ -34,14 +40,9 @@ pub fn bytes16_to_words(b: &[u8; N_FE]) -> [Word; N_FE_WORDS] {
     ]
 }
 
-fn split_lo_hi(b: &CircuitBuilder, w: Wire) -> [Wire; 2] {
-    let lo = b.band(w, b.add_constant_64(0xFFFF_FFFF));
-    let hi = b.shr(w, 32);
-    [lo, hi]
-}
-
-fn combine_blake3_digest(b: &CircuitBuilder, out: &[Wire; 8]) -> [Wire; 4] {
-    std::array::from_fn(|k| b.bor(out[2 * k], b.shl(out[2 * k + 1], 32)))
+/// A digest or public parameter as circuit words, eight big-endian bytes each.
+pub fn node_words(b: &[u8; DIGEST_LEN]) -> [Word; DIGEST_WIRES] {
+    packed_words(b).try_into().expect("two words")
 }
 
 pub type GhashWires = [Wire; N_FE_WORDS];
@@ -63,109 +64,161 @@ pub fn hm_affine_check(
     b_circ.assert_eq("hm_affine_hi", acc[1], m_hat[1]);
 }
 
-pub struct Blake3RevealR {
-    pub r: [GhashWires; N_NONCE],
-    pub y_hat: [Wire; 8],
+/// The two big-endian 32-bit SHA-256 words of a little-endian 64-bit word.
+fn be32_words(b: &CircuitBuilder, mask32: Wire, w: Wire) -> [Wire; 2] {
+    let s = swap_bytes_32(b, w);
+    [b.band(s, mask32), b.shr(s, 32)]
 }
 
-impl Blake3RevealR {
-    pub fn new(b: &CircuitBuilder) -> Self {
-        let r: [GhashWires; N_NONCE] =
-            std::array::from_fn(|_| std::array::from_fn(|_| b.add_witness()));
-        let mut r32: Vec<Wire> = Vec::with_capacity(N_NONCE * N_FE_WORDS * 2);
-        for r_i in &r {
-            for &word in r_i {
-                r32.extend_from_slice(&split_lo_hi(b, word));
-            }
-        }
-        let y_hat = blake3_fixed(b, &r32, N_NONCE * N_FE);
+/// SHA-256(tag || data) for word-aligned data, from the tag's constant midstate.
+fn sha256_after_tag(b: &CircuitBuilder, tag: &[u8; TAG_BYTES], data: &[Wire]) -> [Wire; 8] {
+    let k = |v: u32| b.add_constant(Word(v as u64));
+    let body = 4 * data.len();
+    let nwords = (body + 9).div_ceil(64) * 16;
+    let bit_len = ((TAG_BYTES + body) as u64) * 8;
+    let mut words: Vec<Wire> = data.to_vec();
+    words.push(k(0x8000_0000));
+    while words.len() < nwords - 2 {
+        words.push(k(0));
+    }
+    words.push(k((bit_len >> 32) as u32));
+    words.push(k(bit_len as u32));
+    let mid = tag_midstate(tag);
+    let mut st = State(array::from_fn(|i| k(mid[i])));
+    for blk in words.chunks_exact(16) {
+        st = sha256_compress(b, st, array::from_fn(|i| blk[i]));
+    }
+    st.0
+}
 
-        Self { r, y_hat }
+/// Proves m̂_k = Σ_i a_{k,i} r_i + b_k, y = SHA-256(nonce tag || r) and
+/// d = SHA-256(digest tag || a || b || y). The public inputs are the words of m̂.
+pub struct ShaCommitGadget {
+    tags: &'static CommitTags,
+    m_hat: [Wire; N_DIGEST_WORDS],
+    com_a: [[GhashWires; N_NONCE]; N_LINES],
+    com_b: [GhashWires; N_LINES],
+    r: [GhashWires; N_NONCE],
+    d: [Wire; 8],
+}
+
+pub const COMMIT_INOUTS: usize = N_DIGEST_WORDS;
+
+impl ShaCommitGadget {
+    pub fn new(b: &CircuitBuilder, tags: &'static CommitTags) -> Self {
+        let m_hat: [Wire; N_DIGEST_WORDS] = array::from_fn(|_| b.add_inout());
+        let ghash = || -> GhashWires { array::from_fn(|_| b.add_witness()) };
+        let com_a: [[GhashWires; N_NONCE]; N_LINES] =
+            array::from_fn(|_| array::from_fn(|_| ghash()));
+        let com_b: [GhashWires; N_LINES] = array::from_fn(|_| ghash());
+        let r: [GhashWires; N_NONCE] = array::from_fn(|_| ghash());
+
+        for k in 0..N_LINES {
+            hm_affine_check(
+                b,
+                &com_a[k],
+                &r,
+                &com_b[k],
+                &[m_hat[2 * k], m_hat[2 * k + 1]],
+            );
+        }
+
+        let mask32 = b.add_constant(Word(0xFFFF_FFFF));
+        let be = |elems: &[GhashWires]| -> Vec<Wire> {
+            elems
+                .iter()
+                .flatten()
+                .flat_map(|&w| be32_words(b, mask32, w))
+                .collect()
+        };
+        let y = sha256_after_tag(b, &tags.nonce, &be(&r));
+        let mut enc = be(com_a.as_flattened());
+        enc.extend(be(&com_b));
+        enc.extend_from_slice(&y);
+        let d = sha256_after_tag(b, &tags.digest, &enc);
+
+        Self {
+            tags,
+            m_hat,
+            com_a,
+            com_b,
+            r,
+            d,
+        }
     }
 
-    pub fn populate(&self, w: &mut WitnessFiller<'_>, r_bytes: &[[u8; N_FE]; N_NONCE]) {
-        for (i, b) in r_bytes.iter().enumerate() {
-            let words = bytes16_to_words(b);
-            for (j, word) in words.into_iter().enumerate() {
-                w[self.r[i][j]] = word;
+    /// d as eight big-endian 32-bit words, each in the low half of its wire.
+    pub fn digest_words(&self) -> &[Wire; 8] {
+        &self.d
+    }
+
+    pub fn inout_wires(&self) -> [Wire; COMMIT_INOUTS] {
+        self.m_hat
+    }
+
+    pub fn populate(
+        &self,
+        w: &mut WitnessFiller<'_>,
+        msg: &[u8],
+        com: &HmCommitment,
+        r: &[GhashElement; N_NONCE],
+    ) {
+        self.populate_digest(w, &self.tags.message_hash(msg), com, r);
+    }
+
+    pub fn populate_digest(
+        &self,
+        w: &mut WitnessFiller<'_>,
+        digest: &[u8; N_Y],
+        com: &HmCommitment,
+        r: &[GhashElement; N_NONCE],
+    ) {
+        let put = |w: &mut WitnessFiller<'_>, wires: &GhashWires, e: &GhashElement| {
+            let words: [Word; N_FE_WORDS] = bytes16_to_words(e);
+            for (wire, word) in wires.iter().zip(words) {
+                w[*wire] = word;
             }
+        };
+        for (wire, word) in self.m_hat.iter().zip(bytes32_to_words(digest)) {
+            w[*wire] = word;
+        }
+        for k in 0..N_LINES {
+            for i in 0..N_NONCE {
+                put(w, &self.com_a[k][i], &com.a[k][i]);
+            }
+            put(w, &self.com_b[k], &com.b[k]);
+        }
+        for i in 0..N_NONCE {
+            put(w, &self.r[i], &r[i]);
         }
     }
 }
 
 pub const BLIND_COMMIT_INOUTS: usize = N_DIGEST_WORDS + DOMAIN_PARAM_WIRES;
 
+/// The stateful scheme's commitment, under [`XMSS_TAGS`], and the signer's
+/// public parameter.
 pub struct BlindCommitGadget {
-    pub m_hat: [Wire; N_DIGEST_WORDS],
-    pub com_a: [[GhashWires; N_NONCE]; N_LINES],
-    pub com_b: [GhashWires; N_LINES],
+    pub sha: ShaCommitGadget,
     pub domain_param: [Wire; DOMAIN_PARAM_WIRES],
-    pub reveal_r: Blake3RevealR,
-    com_d: [Wire; 4],
-    d_digest: [Wire; 8],
 }
 
 impl BlindCommitGadget {
-    pub fn com_d(&self) -> &[Wire; 4] {
-        &self.com_d
-    }
-
-    /// The digest d as the eight little-endian 32-bit BLAKE3 output words.
-    pub fn d_digest_words(&self) -> &[Wire; 8] {
-        &self.d_digest
-    }
-
     pub fn new(b: &CircuitBuilder) -> Self {
-        let m_hat: [Wire; N_DIGEST_WORDS] = std::array::from_fn(|_| b.add_inout());
-        let domain_param: [Wire; DOMAIN_PARAM_WIRES] = std::array::from_fn(|_| b.add_inout());
+        let sha = ShaCommitGadget::new(b, &XMSS_TAGS);
+        let domain_param: [Wire; DOMAIN_PARAM_WIRES] = array::from_fn(|_| b.add_inout());
+        Self { sha, domain_param }
+    }
 
-        let com_a: [[GhashWires; N_NONCE]; N_LINES] = std::array::from_fn(|_| {
-            std::array::from_fn(|_| std::array::from_fn(|_| b.add_witness()))
-        });
-        let com_b: [GhashWires; N_LINES] =
-            std::array::from_fn(|_| std::array::from_fn(|_| b.add_witness()));
-
-        let reveal_r = Blake3RevealR::new(b);
-
-        for k in 0..N_LINES {
-            let m_hat_k = [m_hat[2 * k], m_hat[2 * k + 1]];
-            hm_affine_check(b, &com_a[k], &reveal_r.r, &com_b[k], &m_hat_k);
-        }
-
-        let mut d_msg: Vec<Wire> =
-            Vec::with_capacity((N_LINES * N_NONCE + N_LINES) * N_FE_WORDS * 2 + 8);
-        for line in &com_a {
-            for a_i in line {
-                for &word in a_i {
-                    d_msg.extend_from_slice(&split_lo_hi(b, word));
-                }
-            }
-        }
-        for b_k in &com_b {
-            for &word in b_k {
-                d_msg.extend_from_slice(&split_lo_hi(b, word));
-            }
-        }
-        d_msg.extend_from_slice(&reveal_r.y_hat);
-        let d_digest = blake3_fixed(b, &d_msg, COMMITMENT_BYTES);
-        let com_d = combine_blake3_digest(b, &d_digest);
-
-        Self {
-            m_hat,
-            com_a,
-            com_b,
-            domain_param,
-            reveal_r,
-            com_d,
-            d_digest,
-        }
+    /// d as the eight big-endian 32-bit words XMSS signs.
+    pub fn com_d(&self) -> &[Wire; MESSAGE_WORDS] {
+        self.sha.digest_words()
     }
 
     pub fn inout_wires(&self) -> [Wire; BLIND_COMMIT_INOUTS] {
-        let mut out = [self.m_hat[0]; BLIND_COMMIT_INOUTS];
-        out[0..N_DIGEST_WORDS].copy_from_slice(&self.m_hat);
-        out[N_DIGEST_WORDS..N_DIGEST_WORDS + DOMAIN_PARAM_WIRES]
-            .copy_from_slice(&self.domain_param);
+        let mut out = [self.domain_param[0]; BLIND_COMMIT_INOUTS];
+        out[..N_DIGEST_WORDS].copy_from_slice(&self.sha.inout_wires());
+        out[N_DIGEST_WORDS..].copy_from_slice(&self.domain_param);
         out
     }
 
@@ -174,32 +227,16 @@ impl BlindCommitGadget {
         w: &mut WitnessFiller<'_>,
         msg: &[u8],
         com: &HmCommitment,
-        r: &[[u8; N_FE]; N_NONCE],
+        r: &[GhashElement; N_NONCE],
         domain_param: &[u8],
     ) {
-        let m_hat_words = bytes32_to_words(&blake3_256(msg));
-        for i in 0..N_DIGEST_WORDS {
-            w[self.m_hat[i]] = m_hat_words[i];
-        }
-        for k in 0..N_LINES {
-            for i in 0..N_NONCE {
-                let words = bytes16_to_words(&com.a[k][i]);
-                for (j, word) in words.into_iter().enumerate() {
-                    w[self.com_a[k][i][j]] = word;
-                }
-            }
-            let words = bytes16_to_words(&com.b[k]);
-            for (j, word) in words.into_iter().enumerate() {
-                w[self.com_b[k][j]] = word;
-            }
-        }
+        self.sha.populate(w, msg, com, r);
         let dp: &[u8; PK_SEED_BYTES] = domain_param
             .try_into()
             .expect("domain_param must be PK_SEED_BYTES bytes");
-        for (wire, word) in self.domain_param.iter().zip(bytes16_to_words(dp)) {
+        for (wire, word) in self.domain_param.iter().zip(node_words(dp)) {
             w[*wire] = word;
         }
-        self.reveal_r.populate(w, r);
     }
 }
 
@@ -207,8 +244,8 @@ pub fn build_blind_commit_public_words(
     msg: &[u8],
     pk_seed: &[u8; PK_SEED_BYTES],
 ) -> [Word; BLIND_COMMIT_INOUTS] {
-    let m_hat_words = bytes32_to_words(&blake3_256(msg));
-    let domain_param_words = bytes16_to_words(&build_wots_domain_param(pk_seed));
+    let m_hat_words = bytes32_to_words(&XMSS_TAGS.message_hash(msg));
+    let domain_param_words = node_words(&build_wots_domain_param(pk_seed));
 
     let mut out = [Word::from_u64(0); BLIND_COMMIT_INOUTS];
     out[0..N_DIGEST_WORDS].copy_from_slice(&m_hat_words);
@@ -241,7 +278,7 @@ impl XmssVerifyGadget {
     pub fn new(
         b: &CircuitBuilder,
         domain_param_wires: &[Wire; PUBLIC_PARAM_WIRES],
-        signed_msg_wires: &[Wire; MESSAGE_WIRES],
+        signed_msg_words: &[Wire; MESSAGE_WORDS],
         merkle_root_wires: &[Wire; DIGEST_WIRES],
         epoch_mask_wire: Wire,
     ) -> Self {
@@ -250,12 +287,12 @@ impl XmssVerifyGadget {
 
         assert_epoch_below_height(b, epoch, epoch_mask_wire);
 
+        let h = XmssHasher::new(b, domain_param_wires, epoch);
         circuit_xmss_verify(
-            b,
+            &h,
             domain_param_wires,
             merkle_root_wires,
-            signed_msg_wires,
-            epoch,
+            signed_msg_words,
             &signature,
         );
 
@@ -264,7 +301,7 @@ impl XmssVerifyGadget {
 
     pub fn populate(&self, w: &mut WitnessFiller<'_>, xmss_sig: &XmssSignature) {
         w[self.epoch] = Word::from_u64(xmss_sig.epoch as u64);
-        self.signature.populate(w, &xmss_sig.to_upstream());
+        self.signature.populate(w, &xmss_sig.to_signature());
     }
 }
 

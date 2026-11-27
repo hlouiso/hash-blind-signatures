@@ -1,13 +1,16 @@
-//! Stateful XMSS matching the Binius64 circuit. The circuit always verifies a
-//! 32-level path; keys with real height h < 32 use seed-derived fixed siblings
-//! above level h. A two-level fractal traversal materializes the top tree and
-//! caches only the bottom subtree containing the current epoch.
+//! Stateful XMSS matching the Binius64 circuit, which verifies a 24-level
+//! path. The CLI and the benchmarks fix the height at 24; smaller keys, which
+//! the tests use to stay fast, take seed-derived fixed siblings above level h. A two-level fractal traversal materializes the top tree and
+//! caches only the bottom subtree containing the current epoch. Keys are
+//! derived as in `longfellow/src/xmss.cc`, so a seed gives the same root in
+//! both implementations.
 
 use rand::{CryptoRng, Rng};
 use rayon::prelude::*;
 
-use binius_circuits::hash_based_sig::xmss::{
-    XmssPublicKey, XmssSignature as BiXmssSignature, xmss_verify as upstream_verify,
+use crate::slh::native::hmac_sha256;
+use crate::ts_xmss::xmss::{
+    XmssPublicKey, XmssSignature as TsXmssSignature, xmss_verify as ts_verify,
 };
 
 use crate::hashes::{
@@ -15,12 +18,11 @@ use crate::hashes::{
 };
 use crate::wots::{
     LEN, PK_SEED_BYTES, SK_SEED_BYTES, build_wots_domain_param, compute_wots_chain_ends,
-    compute_wots_public_key, compute_wots_signature, derive_wots_secret_key, wots_leaf,
+    compute_wots_public_key, compute_wots_signature, derive_wots_prf_key, derive_wots_secret_key,
+    derive_wots_secret_key_with, wots_leaf,
 };
 
 pub const N: usize = DIGEST_LEN;
-
-pub const XMSS_H: usize = 10;
 
 pub const SUBTREE_H: usize = 16;
 
@@ -31,7 +33,8 @@ pub fn cache_split_height(height: usize) -> usize {
     if height <= 8 { height } else { height.saturating_sub(16).max(8) }
 }
 
-const UPPER_SIBLING_DOMAIN: &[u8] = b"blind-xmss-binius64/upper-siblings";
+/// Longfellow's label, shared so both implementations derive the same keys.
+const UPPER_SIBLING_LABEL: &[u8] = b"blind-xmss-longfellow/upper-siblings/v1";
 
 fn build_subtree(
     sk_seed: &[u8; SK_SEED_BYTES],
@@ -41,12 +44,13 @@ fn build_subtree(
 ) -> Vec<Vec<Digest>> {
     let width = 1usize << subtree_h;
     let base_epoch = (s as u64) << subtree_h;
+    let prf_key = derive_wots_prf_key(sk_seed);
 
     let leaves: Vec<Digest> = (0..width)
         .into_par_iter()
         .map(|j| {
             let epoch = (base_epoch + j as u64) as u32;
-            let sk = derive_wots_secret_key(sk_seed, epoch);
+            let sk = derive_wots_secret_key_with(&prf_key, param, epoch);
             let public_key = compute_wots_public_key(param, epoch, &sk);
             wots_leaf(param, epoch, &public_key)
         })
@@ -152,8 +156,8 @@ pub fn epoch_in_tree(epoch: u32, height: usize) -> bool {
 }
 
 impl XmssSignature {
-    pub fn to_upstream(&self) -> BiXmssSignature {
-        BiXmssSignature {
+    pub fn to_signature(&self) -> TsXmssSignature {
+        TsXmssSignature {
             randomness: self.randomness,
             chain_tips: self.chain_tips,
             merkle_path: self.merkle_path,
@@ -180,7 +184,7 @@ pub fn xmss_verify(root: &Digest, message: &Message, sig: &XmssSignature) -> boo
         merkle_root: *root,
         public_param: sig.public_param,
     };
-    upstream_verify(&public_key, message, &sig.to_upstream(), sig.epoch).is_ok()
+    ts_verify(&public_key, message, &sig.to_signature(), sig.epoch).is_ok()
 }
 
 pub fn climb(
@@ -253,7 +257,7 @@ impl XmssKeyPair {
     pub fn generate(rng: &mut impl Rng, pk_seed: &[u8; PK_SEED_BYTES]) -> Self {
         let mut sk_seed = [0u8; SK_SEED_BYTES];
         rng.fill_bytes(&mut sk_seed);
-        Self::generate_from_seed(&sk_seed, pk_seed, XMSS_H)
+        Self::generate_from_seed(&sk_seed, pk_seed, LOG_LIFETIME)
     }
 
     pub fn generate_from_seed(
@@ -384,7 +388,7 @@ impl XmssKeyPair {
         let (randomness, encoding) =
             crate::hashes::find_randomness_for_wots_encoding(message, epoch, &param, rng);
 
-        let sk = derive_wots_secret_key(&self.sk_seed, epoch);
+        let sk = derive_wots_secret_key(&self.sk_seed, &self.pk_seed, epoch);
         let chain_tips = compute_wots_signature(&param, epoch, &sk, &encoding);
         let merkle_path = self.merkle_path(epoch).ok_or(XmssSignError::TreeMismatch)?;
 
@@ -449,15 +453,16 @@ impl XmssKeyPair {
     }
 }
 
+/// Sibling i above the real tree: HMAC-SHA-256(key, i), truncated, under
+/// key = HMAC-SHA-256(sk_seed, label).
 fn derive_upper_siblings(sk_seed: &[u8; SK_SEED_BYTES], levels: usize) -> Vec<Digest> {
-    let mut hasher = blake3::Hasher::new_keyed(sk_seed);
-    hasher.update(UPPER_SIBLING_DOMAIN);
-    let mut xof = hasher.finalize_xof();
+    let key = hmac_sha256(sk_seed, &[UPPER_SIBLING_LABEL]);
     (0..levels)
-        .map(|_| {
-            let mut node = [0u8; N];
-            xof.fill(&mut node);
-            node
+        .map(|i| {
+            let out = hmac_sha256(&key, &[&(i as u32).to_le_bytes()]);
+            out[..N]
+                .try_into()
+                .expect("a digest is a prefix of the output")
         })
         .collect()
 }
@@ -564,7 +569,7 @@ mod tests {
             let mut flat: Vec<Vec<Digest>> = vec![
                 (0..1u32 << height)
                     .map(|epoch| {
-                        let sk = derive_wots_secret_key(&sk_seed, epoch);
+                        let sk = derive_wots_secret_key(&sk_seed, &pk_seed, epoch);
                         let pk = compute_wots_public_key(&param, epoch, &sk);
                         wots_leaf(&param, epoch, &pk)
                     })
@@ -748,6 +753,7 @@ mod tests {
         sig.height = TEST_H - 1;
         assert!(!xmss_verify(&kp.root, &msg, &sig));
         assert!(!epoch_in_tree(0, 0) && !epoch_in_tree(0, LOG_LIFETIME + 1));
-        assert!(epoch_in_tree(u32::MAX, LOG_LIFETIME));
+        assert!(epoch_in_tree((1 << LOG_LIFETIME) - 1, LOG_LIFETIME));
+        assert!(!epoch_in_tree(1 << LOG_LIFETIME, LOG_LIFETIME));
     }
 }

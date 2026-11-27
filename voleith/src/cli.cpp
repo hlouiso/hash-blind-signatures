@@ -76,18 +76,29 @@ struct Lock {
   }
 };
 
+// The stateful scheme fixes the XMSS height at the XMSS_H levels the circuit
+// checks; a key file of any other height was not made by this keygen.
+void require_fixed_height(int height, const char* file) {
+  if (height != XMSS_H)
+    throw std::runtime_error(std::string(file) + " has XMSS height " +
+                             std::to_string(height) + "; keys have height " +
+                             std::to_string(XMSS_H) + ", run keygen again");
+}
+
 void usage() {
   std::cout
       << "usage: blindsig <keygen|commit|sign|prove|verify|params> "
-         "[message_file] [-d directory] [--height h] [--stateful|--stateless]\n"
-      << "keygen --stateful (the default) puts XMSS underneath: each signature\n"
-         "consumes a leaf and sign rewrites signer_key.bin. keygen --stateless\n"
+         "[message_file] [-d directory] [--stateful|--stateless]\n"
+      << "keygen --stateful (the default) puts XMSS of height " << XMSS_H
+      << " underneath,\n2^" << XMSS_H
+      << " one-time signatures (the lifetime of SLH-DSA-128-24): each signature\n"
+         "consumes a leaf and sign rewrites signer_key.bin; keygen sweeps all the\n"
+         "leaves, a few minutes on 8 cores. keygen --stateless\n"
          "puts SLH-DSA-SHAKE-128-24 underneath: sign never rewrites the key. The\n"
          "other commands follow the scheme recorded in the key files. In both\n"
          "schemes keygen also writes signer_cache.bin, the upper levels of the\n"
          "signer's tree, so that sign rebuilds one small subtree instead of the\n"
          "whole key; without it, sign rebuilds the key and rewrites the cache.\n"
-      << "Default real XMSS height: 10. All XMSS proofs check a 32-level path.\n"
       << "Application hashes: SHAKE256; VOLE: GF(2^128), tau=" << kVoleTrees
       << ", degree=" << kProofDegree << ", grind=" << kGrindingBits << ".\n";
 }
@@ -182,8 +193,6 @@ int main(int argc, char** argv) try {
   }
   std::string command = argv[1];
   fs::path dir = ".", message;
-  int height = XMSS_H_DEFAULT;
-  bool height_set = false;
   int scheme = 0;  // 0 unset, 1 stateful, 2 stateless
   for (int i = 2; i < argc; ++i) {
     std::string a = argv[i];
@@ -195,13 +204,7 @@ int main(int argc, char** argv) try {
         throw std::invalid_argument("--stateful and --stateless are mutually exclusive");
       scheme = s;
     }
-    else if (a == "--height" && i + 1 < argc) {
-      std::string v = argv[++i];
-      size_t used = 0;
-      height = std::stoi(v, &used);
-      if (used != v.size()) throw std::invalid_argument("invalid height");
-      height_set = true;
-    } else if (a == "-h" || a == "--help") {
+    else if (a == "-h" || a == "--help") {
       usage();
       return 0;
     } else if (!a.starts_with('-') && message.empty())
@@ -217,14 +220,9 @@ int main(int argc, char** argv) try {
   if (has_message == message.empty())
     throw std::invalid_argument(
         "message file required only for commit and verify");
-  if (height_set && command != "keygen")
-    throw std::invalid_argument("--height is for keygen only");
   if (scheme != 0 && command != "keygen")
     throw std::invalid_argument("--stateful and --stateless are keygen options; " +
                                 command + " follows the key files");
-  if (scheme == 2 && height_set)
-    throw std::invalid_argument(
-        "--height sets the XMSS tree height and does not apply to --stateless");
   auto start = std::chrono::steady_clock::now();
   if (command == "keygen") {
     fs::create_directories(dir);
@@ -249,6 +247,7 @@ int main(int argc, char** argv) try {
                 << " s\n";
       return 0;
     }
+    const int height = XMSS_H;
     auto signer = Signer::generate_cached(height);
     write(dir / "signer_key.bin", encode(signer.secret_key()));
     write(dir / "signer_pub.bin", encode(signer.public_key()));
@@ -301,6 +300,7 @@ int main(int argc, char** argv) try {
     Lock lock(dir / "signer.lock");
     auto com = decode_commitment(read(dir / "commitment.bin", 264));
     const auto sk = decode_secret(read(dir / "signer_key.bin", 65));
+    require_fixed_height(sk.height, "signer_key.bin");
     if (sk.next_leaf == (uint64_t(1) << sk.height))
       throw std::runtime_error("XMSS key exhausted");
     std::optional<Signer> cached;
@@ -340,6 +340,7 @@ int main(int argc, char** argv) try {
       return 0;
     }
     auto pk = decode_public(pub);
+    require_fixed_height(pk.height, "signer_pub.bin");
     auto state = decode_state(state_bytes);
     auto response =
         decode_response(read(dir / "xmss_sig.bin", 8 + XMSS_SIG_BYTES));
@@ -364,6 +365,7 @@ int main(int argc, char** argv) try {
       return 0;
     }
     auto pk = decode_public(pub);
+    require_fixed_height(pk.height, "signer_pub.bin");
     if (!verify_signature(pk, read(message),
                           read(dir / "blind_sig.bin", proof_layout().size))) {
       std::cerr << "[FAIL]\n";

@@ -2,7 +2,7 @@
 //!
 //! The salted ZK proof and the transcript framing are those of
 //! `crate::protocol`; the Halevi–Micali commitment is that of
-//! `super::commit`, with SHA-256 in place of BLAKE3. The signer returns a pure
+//! `super::commit`, under the SLH-DSA tags. The signer returns a pure
 //! SLH-DSA signature (empty context) on the 32-byte commitment digest d, and
 //! the user proves knowledge of it. The public inputs are m_hat for the
 //! commitment gadget, then PK.seed, PK.root and the PK.seed midstate for the
@@ -77,7 +77,7 @@ impl SlhSetup {
 fn build_circuit(p: SlhParams, n_signers: usize) -> (SlhSetup, ConstraintSystem) {
     assert!(n_signers >= 1, "at least one signer");
     let b = CircuitBuilder::new();
-    let commit = ShaCommitGadget::new(&b);
+    let commit = ShaCommitGadget::new(&b, &super::commit::SLH_TAGS);
     let slh = if n_signers == 1 {
         vec![SlhVerifyGadget::new(&b, p, commit.digest_words())]
     } else {

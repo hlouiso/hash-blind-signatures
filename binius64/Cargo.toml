@@ -49,6 +49,11 @@ rand                = "0.10"
 serde   = { version = "1", features = ["derive"] }
 bincode = "1"
 
+[features]
+# For a binius64 that partitions its wiring matrices: skip the check that
+# pinned upstream's wiring addresses fit 63 bits.
+wide-wiring = []
+
 [dev-dependencies]
 hex = "0.4"
 bytes = "1"

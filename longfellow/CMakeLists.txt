@@ -86,6 +86,13 @@ add_test(NAME protocol_test COMMAND protocol_test)
 
 set_tests_properties(protocol_test PROPERTIES TIMEOUT 1200)
 
+# The native XMSS against the vectors binius64's xmss_kat writes: both define
+# the same SHA-256 instance.
+bl_add_executable(xmss_vector_test tests/xmss_vector_test.cc)
+target_compile_definitions(xmss_vector_test PRIVATE
+  XMSS_TEST_VECTOR_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../test-vectors/xmss")
+add_test(NAME xmss_vector_test COMMAND xmss_vector_test)
+
 # SLH-DSA-SHA2 as the underlying signature (src/slh, circuit/slh_stmt.h).
 add_library(blind_slh_longfellow STATIC
   src/slh/native.cc
@@ -112,7 +119,7 @@ endforeach()
 add_test(NAME slh_test_quick COMMAND slh_test --quick)
 add_test(NAME cli COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/tests/cli_test.sh
          $<TARGET_FILE:blindsig>)
-set_tests_properties(cli PROPERTIES TIMEOUT 1200)
+set_tests_properties(cli PROPERTIES TIMEOUT 2400)
 add_test(NAME slh_test COMMAND slh_test)
 set_tests_properties(slh_test_quick PROPERTIES TIMEOUT 1200)
 set_tests_properties(slh_test PROPERTIES TIMEOUT 3600)

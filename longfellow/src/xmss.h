@@ -1,6 +1,9 @@
-/* Stateful XMSS. The circuit always verifies 32 levels; a key of real height
- * h < 32 uses fixed seed-derived siblings above h. The signer materializes the
- * top tree and caches only the bottom subtree containing the current leaf.
+/* Stateful XMSS of height kXmssH = 24, the lifetime of SLH-DSA-128-24; the
+ * circuit verifies all 24 levels. The CLI and the benchmarks always use that
+ * height. The library still builds smaller trees, completed above h with
+ * fixed seed-derived siblings, so that the tests stay fast. The signer
+ * materializes the top tree and caches only the bottom subtree containing the
+ * current leaf.
  * next_leaf must be persisted: a WOTS+ leaf must never be reused. */
 
 #ifndef BLIND_LONGFELLOW_XMSS_H_
@@ -18,9 +21,7 @@
 
 namespace blind_longfellow {
 
-constexpr size_t kXmssH = 32;
-
-constexpr size_t kXmssHDefault = 10;
+constexpr size_t kXmssH = 24;
 
 constexpr size_t kSubtreeH = 16;
 
@@ -87,8 +88,7 @@ std::optional<XmssSignature> xmss_expand(const WinternitzSpec& spec,
 
 class XmssKeyPair {
  public:
-  static XmssKeyPair generate(Rng& rng, const PkSeed& pk_seed,
-                              size_t height = kXmssHDefault);
+  static XmssKeyPair generate(Rng& rng, const PkSeed& pk_seed, size_t height);
 
   std::optional<XmssSignature> sign(const WinternitzSpec& spec, Rng& rng,
                                     const uint8_t* message, size_t message_len);
@@ -102,8 +102,7 @@ class XmssKeyPair {
   void set_next_leaf(uint64_t leaf) { next_leaf_ = leaf; }
 
   static XmssKeyPair generate_from_seed(const uint8_t sk_seed[kSkSeedBytes],
-                                        const PkSeed& pk_seed,
-                                        size_t height = kXmssHDefault);
+                                        const PkSeed& pk_seed, size_t height);
 
   static XmssKeyPair generate_from_seed_split(const uint8_t sk_seed[kSkSeedBytes],
                                               const PkSeed& pk_seed,
@@ -133,7 +132,7 @@ class XmssKeyPair {
   PkSeed pk_seed_;
   Node root_;
   uint8_t sk_seed_[kSkSeedBytes]{};
-  size_t height_ = kXmssHDefault;
+  size_t height_ = kXmssH;
   size_t subtree_h_ = kSubtreeH;
 
   std::vector<std::vector<Node>> top_;

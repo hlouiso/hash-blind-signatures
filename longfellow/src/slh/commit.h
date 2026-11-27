@@ -22,8 +22,8 @@
  * document. Both need SHA-256 outputs equal to fixed strings.
  * binius64/src/slh/commit.rs does not list the MGF1 case.
  * Being a constant first block, a tag costs nothing in the circuit, which
- * starts from its constant midstate. The XMSS path keeps the untagged
- * commitment of commitment.h. */
+ * starts from its constant midstate. The tag helpers are commitment.h's,
+ * which the XMSS commitment uses with its own labels. */
 
 #ifndef BLIND_LONGFELLOW_SLH_COMMIT_H_
 #define BLIND_LONGFELLOW_SLH_COMMIT_H_
@@ -41,14 +41,9 @@
 namespace blind_longfellow {
 namespace slh {
 
-constexpr size_t kTagBytes = 64;
-using Tag = std::array<uint8_t, kTagBytes>;
-
 extern const Tag kTagMessage;  // "blind-slh-dsa/sha256/v1/message-hash"
 extern const Tag kTagNonce;    // "blind-slh-dsa/sha256/v1/commitment-y"
 extern const Tag kTagDigest;   // "blind-slh-dsa/sha256/v1/commitment-d"
-
-State tag_midstate(const Tag& tag);
 
 // m_hat = SHA-256(TAG_MESSAGE || msg).
 Hash message_hash(const uint8_t* msg, size_t len);
