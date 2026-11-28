@@ -284,25 +284,29 @@ class Circuit {
     return result;
   }
 
-  // Decode two 3-bit halves once. Their products already have degree two
-  // in QuickSilver and can be used directly in the three field lookups.
+  // One Boolean indicator per value of a nonempty little-endian bit string.
+  Bits decode(std::span<const Bit> bits) {
+    Bits flags{invert(bits.back()), bits.back()};
+    for (size_t n = bits.size() - 1; n > 0; --n) {
+      Bits next;
+      next.reserve(2 * flags.size());
+      for (const auto& flag : flags) {
+        auto one = e.mul(flag, bits[n - 1]);
+        next.push_back(e.add(flag, one));
+        next.push_back(one);
+      }
+      flags = std::move(next);
+    }
+    return flags;
+  }
+
+  // The products of the two halves have degree two and are used directly
+  // in all three field lookups.
   auto chain_flags(const Bits& index) {
     e.zero(index[6]);
     e.zero(index[7]);
-    auto decode_three = [&](size_t offset) {
-      Bits flags{invert(index[offset + 2]), index[offset + 2]};
-      for (size_t bit : {offset + 1, offset}) {
-        Bits next;
-        for (const auto& flag : flags) {
-          auto one = e.mul(flag, index[bit]);
-          next.push_back(e.add(flag, one));
-          next.push_back(one);
-        }
-        flags = std::move(next);
-      }
-      return flags;
-    };
-    auto lo = decode_three(0), hi = decode_three(3);
+    auto lo = decode(std::span(index).first(3));
+    auto hi = decode(std::span(index).subspan(3, 3));
     auto packed = [&](const Bit& bit) { return e.pack(std::span(&bit, 1)); };
     using Flag = decltype(e.product(packed(lo[0]), packed(hi[0])));
     std::array<Flag, XMSS_WOTS_LEN> flags;
@@ -338,7 +342,36 @@ class Circuit {
     return out;
   }
 
-  Bits shake(const Bits& input_bits, size_t output_bytes) {
+  // Nodes are 128 Boolean wires in the polynomial basis of GF(2^128).
+  // Multiplying the packed difference by the selector binds all 128 output
+  // bits with one field constraint. The witness supplies their decomposition.
+  Bits select_node(const Bit& flag, const Bits& yes, const Bits& no) {
+    const auto base = e.pack(no);
+    return e.field_witness(e.product(e.pack(std::span(&flag, 1)), e.pack(yes) + base) + base);
+  }
+
+  Bits ordered_nodes(const Bit& swap, const Bits& node, const Bits& sibling) {
+    Bits pair = select_node(swap, sibling, node);
+    for (size_t i = 0; i < node.size(); ++i)
+      pair.push_back(e.add(e.add(pair[i], node[i]), sibling[i]));
+    return pair;
+  }
+
+  // m_hat[k] = b[k] + sum_i a[k,i] r[i] in GF(2^128).
+  Bits commitment_intercepts(const Bits& m, const Bits& a, const Bits& r) {
+    Bits b;
+    for (size_t line = 0; line < 2; ++line) {
+      auto sum = e.product(e.pack(slice(a, line * 768, 128)),
+                           e.pack(slice(r, 0, 128)));
+      for (size_t i = 1; i < 6; ++i)
+        sum = sum + e.product(e.pack(slice(a, line * 768 + i * 128, 128)),
+                              e.pack(slice(r, i * 128, 128)));
+      append(b, e.field_witness(sum + e.pack(slice(m, line * 128, 128))));
+    }
+    return b;
+  }
+
+  Bits shake(const Bits& input_bits, size_t output_bytes, const uint64_t* init = nullptr) {
     if (input_bits.size() % 8 || output_bytes > 136)
       throw std::logic_error("SHAKE circuit size");
     Bits padded = input_bits;
@@ -346,6 +379,9 @@ class Circuit {
     while (padded.size() % 1088) padded.push_back(e.constant(0));
     padded.back() = e.add(padded.back(), e.constant(1));
     auto state = number(0, 1600);
+    if (init)
+      for (size_t i = 0; i < 1600; ++i)
+        state[i] = e.constant((init[i / 64] >> (i % 64)) & 1);
     for (size_t off = 0; off < padded.size(); off += 1088) {
       for (size_t i = 0; i < 1088; ++i)
         state[i] = e.add(state[i], padded[off + i]);
@@ -381,15 +417,7 @@ class Circuit {
       throw std::invalid_argument("XMSS height must be in [1," + std::to_string(XMSS_H) + "]");
     auto r = input(0, 96), a = input(96, 192);
     auto m = constant(pub.message), seed = constant(pub.pk_seed);
-    Bits b;
-    for (size_t line = 0; line < 2; ++line) {
-      auto sum = e.product(e.pack(slice(a, line * 768, 128)),
-                           e.pack(slice(r, 0, 128)));
-      for (size_t i = 1; i < 6; ++i)
-        sum = sum + e.product(e.pack(slice(a, line * 768 + i * 128, 128)),
-                              e.pack(slice(r, i * 128, 128)));
-      append(b, e.field_witness(sum + e.pack(slice(m, line * 128, 128))));
-    }
+    auto b = commitment_intercepts(m, a, r);
     auto y = hash("HMy", r);
     Bits com = a;
     append(com, b);
@@ -483,21 +511,14 @@ class Circuit {
     auto idx = epoch;
     for (size_t level = 0; level < XMSS_H; ++level) {
       auto sibling = input(kSigOffset + 28 + 42 * 16 + level * 16, 16);
-      // Multiplication by a Boolean selects the entire field element.
-      auto node_value = e.pack(node);
-      auto left = e.field_witness(e.product(
-          e.pack(std::span(idx).first(1)), node_value + e.pack(sibling)) + node_value);
-      Bits right(128);
-      for (size_t i = 0; i < 128; ++i)
-        right[i] = e.add(e.add(left[i], node[i]), sibling[i]);
+      auto children = ordered_nodes(idx[0], node, sibling);
       idx.erase(idx.begin());
       idx.push_back(e.constant(0));
       auto tree_dom = seed;
       append(tree_dom, number(XMSS_TWEAK_TREE, 8));
       append(tree_dom, number(level, 8));
       append(tree_dom, idx);
-      append(left, right);
-      node = hash(tree_dom, left, 16);
+      node = hash(tree_dom, children, 16);
     }
     equal_field(node, constant(pub.root));
     // The VOLE API consumes whole bytes. Bind the final padding bits too.

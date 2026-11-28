@@ -12,7 +12,7 @@
  * the witness, so they stay secret.
  *
  * Every value is a byte of eight Boolean wires: inputs are asserted to be
- * bits, and the bit plucker asserts each unpacked SHA-256 witness bit. The
+ * bits, and the bit plucker checks membership in the four-bit SHA-256 encoding. The
  * ADRSc bytes are rewired digest bits, so no carry or high-half garbage can
  * reach them.
  *
@@ -238,8 +238,11 @@ class SlhStatement {
   Bytes8 ordered(const BitW& bit, const Bytes8& node, const Bytes8& sib) const {
     Bytes8 out(2 * kN);
     for (size_t i = 0; i < kN; ++i) {
-      L_.vmux(bit, out[i], sib[i], node[i]);
-      L_.vmux(bit, out[kN + i], node[i], sib[i]);
+      for (size_t j = 0; j < 8; ++j) {
+        const BitW delta = L_.land(bit, L_.lxor(node[i][j], sib[i][j]));
+        out[i][j] = L_.lxor(node[i][j], delta);
+        out[kN + i][j] = L_.lxor(sib[i][j], delta);
+      }
     }
     return out;
   }

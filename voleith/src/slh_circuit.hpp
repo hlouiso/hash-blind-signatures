@@ -13,14 +13,9 @@
 // secret. Every witness value is one bit, so no carry or high-half garbage
 // can reach an address byte: the ADRS fields are rewired digest bits.
 //
-// The WOTS+ chains take all w - 1 steps at hash addresses s = 0 .. w - 2,
-// keeping step s exactly when the digit is at most s. The select
-// x <- keep ? F(x) : x costs 128 witness bits per step: folding it into the
-// next permutation's input would make that input degree 2, and degree-2
-// inputs need 5 + 3, 6 + 3 and 6 rounds between the snapshots at degree 64,
-// 23 rounds in all, one short of 24 (see the report).
+// Each WOTS+ chain starts at the supplied signature node and its secret digit.
+// The circuit hashes w - 1 times and selects the required prefix endpoint once.
 #include "circuit.hpp"
-#include <optional>
 extern "C" {
 #include "native/slh.h"
 #include "native/slh_commit.h"
@@ -61,23 +56,6 @@ constexpr size_t sig_bytes(const slh_params& p) {
   return SLH_N * (1 + p.k * (1 + p.a) + p.h + p.d * len(p));
 }
 
-// Multiplications of SlhCircuit::less_const(x, c) for an n-bit x.
-constexpr size_t less_const_muls(size_t n, uint64_t c) {
-  int state = 0;  // 0: constant 0, 1: constant 1, 2: a wire
-  size_t muls = 0;
-  for (size_t i = 0; i < n; ++i) {
-    const bool one = (c >> i) & 1;
-    if (state == 2) {
-      ++muls;
-    } else if (one) {
-      state = state == 0 ? 2 : 1;  // !x OR 0 = !x; !x OR 1 = 1
-    } else {
-      state = state == 0 ? 0 : 2;  // !x AND 0 = 0; !x AND 1 = !x
-    }
-  }
-  return muls;
-}
-
 // Multiplications of SlhCircuit::sum_tree over `count` numbers of `bits`.
 constexpr size_t sum_tree_muls(size_t count, size_t bits) {
   size_t muls = 0;
@@ -109,6 +87,10 @@ constexpr SlhDims slh_dims(const slh_params& p) {
     bits += n;
     cons += n;
   };
+  auto node_witness = [&] {
+    bits += 8 * SLH_N;
+    ++cons;
+  };
   const size_t primary = HM_R_BYTES + HM_A_BYTES + sig_bytes(p);
   bits += 8 * primary;
   bits += 256;  // b, two field witnesses
@@ -120,22 +102,23 @@ constexpr SlhDims slh_dims(const slh_params& p) {
   for (size_t i = 0; i < p.k; ++i) {
     shake(th + SLH_N, SLH_N);
     for (size_t j = 0; j < p.a; ++j) {
-      muls(8 * SLH_N);
+      node_witness();
       shake(th + 2 * SLH_N, SLH_N);
     }
   }
   shake(th + p.k * SLH_N, SLH_N);  // T_k
   for (size_t layer = 0; layer < p.d; ++layer) {
     muls(sum_tree_muls(len1(p), p.lg_w));
-    for (size_t i = 0; i < len(p); ++i)
-      for (size_t s = 0; s + 1 < w(p); ++s) {
-        shake(th + SLH_N, SLH_N);
-        muls(less_const_muls(p.lg_w, s + 1));
-        muls(8 * SLH_N);
-      }
+    for (size_t i = 0; i < len(p); ++i) {
+      // One-hot digit decoder, then w-2 increments modulo w of the address.
+      muls(w(p) - 2);
+      if (p.lg_w > 2) muls((w(p) - 2) * (p.lg_w - 2));
+      for (size_t s = 0; s + 1 < w(p); ++s) shake(th + SLH_N, SLH_N);
+      node_witness();  // decompose the selected endpoint
+    }
     shake(th + len(p) * SLH_N, SLH_N);  // T_len
     for (size_t k = 0; k < p.hp; ++k) {
-      muls(8 * SLH_N);
+      node_witness();
       shake(th + 2 * SLH_N, SLH_N);
     }
   }
@@ -158,25 +141,6 @@ class SlhCircuit {
   const slh_params& p;
 
   SlhCircuit(E& engine, const slh_params& params) : e(engine), c(engine), p(params) {}
-
-  // SHAKE256 of `input`, absorbed after a full block whose state is `init`
-  // (nullptr: the zero state), truncated to out_bytes.
-  Bits shake_from(const uint64_t* init, const Bits& input, size_t out_bytes) {
-    Bits padded = input;
-    Circuit<E>::append(padded, c.number(0x1f, 8));
-    while (padded.size() % 1088) padded.push_back(e.constant(0));
-    padded.back() = e.add(padded.back(), e.constant(1));
-    Bits state(1600);
-    for (size_t i = 0; i < 1600; ++i)
-      state[i] = e.constant(init ? (init[i / 64] >> (i % 64)) & 1 : 0);
-    for (size_t off = 0; off < padded.size(); off += 1088) {
-      for (size_t i = 0; i < 1088; ++i) state[i] = e.add(state[i], padded[off + i]);
-      state = e.permute(std::move(state),
-                        off + 1088 == padded.size() ? out_bytes * 8 : 1600);
-    }
-    state.resize(out_bytes * 8);
-    return state;
-  }
 
   // Bit t of a byte string read as a big-endian bit stream.
   static const Bit& stream_bit(const Bits& x, size_t t) {
@@ -233,36 +197,31 @@ class SlhCircuit {
     return c.shake(in, SLH_N);
   }
 
-  // (left || right) = (node || sib) when bit is 0, (sib || node) when 1.
-  Bits ordered(const Bit& bit, const Bits& node, const Bits& sib) {
-    Bits out = c.select(bit, sib, node);
-    for (size_t i = 0; i < node.size(); ++i)
-      out.push_back(e.add(e.add(out[i], node[i]), sib[i]));
-    return out;
-  }
-
-  // x < c for a constant c, folding the constant prefix.
-  Bit less_const(const Bits& x, uint64_t k) {
-    std::optional<unsigned> konst = 0u;
-    Bit lt = e.constant(0);
-    for (size_t i = 0; i < x.size(); ++i) {
-      const Bit nx = c.invert(x[i]);
-      const bool one = (k >> i) & 1;
-      if (!konst) {
-        // !x OR lt = !x + lt + !x lt;  !x AND lt = !x lt.
-        const Bit both = e.mul(nx, lt);
-        lt = one ? e.add(e.add(nx, lt), both) : both;
-      } else if (one) {
-        if (*konst == 0) {
-          lt = nx;
-          konst.reset();
+  Bits wots_endpoint(const Bits& seed, uint32_t layer, const Bits& tree, const Bits& leaf,
+                     uint32_t chain, const Bits& digit, Bits x) {
+    const Bits flags = c.decode(digit);
+    const size_t w = flags.size();
+    auto term = [&](size_t value) {
+      return e.product(e.pack(std::span(&flags[value], 1)), e.pack(x));
+    };
+    // For digit d the endpoint is H_{w-2}(...H_d(sig)). Only the first
+    // w-1-d outputs matter. The address wraps only after that endpoint.
+    auto endpoint = term(w - 1);
+    Bits pos = digit;
+    for (size_t step = 0; step < w - 1; ++step) {
+      x = thash(seed, adrs(layer, tree, 0, leaf, c.number(chain, 32), pos), x);
+      endpoint = endpoint + term(w - 2 - step);
+      if (step + 2 < w) {
+        auto carry = pos[0];
+        pos[0] = c.invert(carry);
+        for (size_t j = 1; j < pos.size(); ++j) {
+          auto old = pos[j];
+          pos[j] = e.add(old, carry);
+          if (j + 1 < pos.size()) carry = e.mul(old, carry);
         }
-      } else if (*konst == 1) {
-        lt = nx;
-        konst.reset();
       }
     }
-    return konst ? e.constant(*konst) : lt;
+    return e.field_witness(endpoint);
   }
 
   // a + b, one bit wider; one multiplication per bit.
@@ -301,24 +260,15 @@ class SlhCircuit {
     auto r = c.input(kSlhROffset, HM_R_BYTES), a = c.input(kSlhAOffset, HM_A_BYTES);
     auto m = c.constant(pub.message), seed = c.constant(pub.pk_seed);
 
-    // m_hat_k = b_k + sum_i a_{k,i} r_i in GF(2^128).
-    Bits b;
-    for (size_t line = 0; line < 2; ++line) {
-      auto sum = e.product(e.pack(Circuit<E>::slice(a, line * 768, 128)),
-                           e.pack(Circuit<E>::slice(r, 0, 128)));
-      for (size_t i = 1; i < 6; ++i)
-        sum = sum + e.product(e.pack(Circuit<E>::slice(a, line * 768 + i * 128, 128)),
-                              e.pack(Circuit<E>::slice(r, i * 128, 128)));
-      Circuit<E>::append(b, e.field_witness(sum + e.pack(Circuit<E>::slice(m, line * 128, 128))));
-    }
+    const Bits b = c.commitment_intercepts(m, a, r);
     uint64_t nonce_state[25], digest_state[25];
     slh_tag_state(SLH_TAG_NONCE, nonce_state);
     slh_tag_state(SLH_TAG_DIGEST, digest_state);
-    const Bits y = shake_from(nonce_state, r, HM_Y_BYTES);
+    const Bits y = c.shake(r, HM_Y_BYTES, nonce_state);
     Bits com = a;
     Circuit<E>::append(com, b);
     Circuit<E>::append(com, y);
-    const Bits d = shake_from(digest_state, com, 32);
+    const Bits d = c.shake(com, 32, digest_state);
 
     const Bits sig = c.input(kSlhSigOffset, slh_detail::sig_bytes(p));
     size_t off = 0;
@@ -354,14 +304,14 @@ class SlhCircuit {
       for (uint32_t j = 0; j < p.a; ++j) {
         const Bits sib = node();
         cur = thash(seed, adrs(0, tree, 3, leaf, c.number(j + 1, 32), shr(leaf_index, j + 1)),
-                    ordered(idx[j], cur, sib));
+                    c.ordered_nodes(idx[j], cur, sib));
       }
       Circuit<E>::append(roots, cur);
     }
     Bits cur = thash(seed, adrs(0, tree, 4, leaf, zero32, zero32), roots);
 
     // Algorithm 13, one XMSS layer at a time.
-    const size_t w = slh_detail::w(p), l1 = slh_len1(&p), l2 = slh_len2(&p);
+    const size_t l1 = slh_len1(&p), l2 = slh_len2(&p);
     for (uint32_t layer = 0; layer < p.d; ++layer) {
       if (layer > 0) {
         leaf = Bits(tree.begin(), tree.begin() + p.hp);
@@ -388,22 +338,14 @@ class SlhCircuit {
         digits.push_back(dg);
       }
       Bits ends;
-      for (uint32_t i = 0; i < l1 + l2; ++i) {
-        Bits x = node();
-        for (uint32_t s = 0; s + 1 < w; ++s) {
-          const Bits y_s =
-              thash(seed, adrs(layer, tree, 0, leaf, c.number(i, 32), c.number(s, 32)), x);
-          const Bit keep = less_const(digits[i], s + 1);  // digit <= s
-          x = c.select(keep, y_s, x);
-        }
-        Circuit<E>::append(ends, x);
-      }
+      for (uint32_t i = 0; i < l1 + l2; ++i)
+        Circuit<E>::append(ends, wots_endpoint(seed, layer, tree, leaf, i, digits[i], node()));
       cur = thash(seed, adrs(layer, tree, 1, leaf, zero32, zero32), ends);
       // Algorithm 11, lines 7-16.
       for (uint32_t k = 0; k < p.hp; ++k) {
         const Bits sib = node();
         cur = thash(seed, adrs(layer, tree, 2, zero32, c.number(k + 1, 32), shr(leaf, k + 1)),
-                    ordered(leaf[k], cur, sib));
+                    c.ordered_nodes(leaf[k], cur, sib));
       }
     }
     if (off != sig.size()) throw std::logic_error("SLH-DSA signature layout");

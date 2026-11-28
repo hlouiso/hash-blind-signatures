@@ -77,18 +77,47 @@ void test_sponge_and_tags() {
 
   // The tag state is the state SHAKE256(tag || x) continues from.
   NativeContext e(Bytes(0), false, 0);
-  SlhCircuit<NativeContext> c(e, kSlhToyW4);
+  Circuit<NativeContext> c(e);
   Bytes x(100);
   for (size_t i = 0; i < x.size(); ++i) x[i] = uint8_t(5 * i + 1);
   uint64_t st[25];
   slh_tag_state(SLH_TAG_DIGEST, st);
-  const auto out = c.shake_from(st, c.c.constant(x), 32);
+  const auto out = c.shake(c.constant(x), 32, st);
   uint8_t got[32] = {}, want[32];
   for (size_t i = 0; i < 256; ++i) got[i / 8] |= out[i] << (i % 8);
   Bytes cat(SLH_TAG_DIGEST, SLH_TAG_DIGEST + SLH_TAG_BYTES);
   cat.insert(cat.end(), x.begin(), x.end());
   shake256_raw(cat.data(), cat.size(), want, 32);
   record("circuit SHAKE256 after a tag block matches XKCP", memcmp(got, want, 32) == 0);
+}
+
+// Compare every possible stopping position with the native SHAKE256 chain.
+void test_wots_endpoints(const slh_params& p) {
+  NativeContext e({}, true, 0);
+  SlhCircuit<NativeContext> slh(e, p);
+  const auto zero = slh.c.number(0, 32);
+  std::array<uint8_t, SLH_N> seed{}, sig{};
+  for (size_t i = 0; i < SLH_N; ++i) {
+    seed[i] = static_cast<uint8_t>(i + 1);
+    sig[i] = static_cast<uint8_t>(2 * i + 1);
+  }
+  const uint32_t w = 1u << p.lg_w;
+  bool ok = true;
+  for (uint32_t d = 0; d < w; ++d) {
+    auto expected = sig;
+    std::array<uint8_t, 32> addr{};
+    addr[27] = 7;  // chain 7, layer/tree/keypair zero
+    for (uint32_t step = d; step + 1 < w; ++step) {
+      addr[31] = static_cast<uint8_t>(step);
+      const uint8_t* parts[] = {seed.data(), addr.data(), expected.data()};
+      const size_t sizes[] = {seed.size(), addr.size(), expected.size()};
+      slh_shake256(parts, sizes, 3, expected.data(), expected.size());
+    }
+    const auto got = slh.wots_endpoint(slh.c.constant(seed), 0, zero, zero, 7,
+                                       slh.c.number(d, p.lg_w), slh.c.constant(sig));
+    ok &= got == slh.c.constant(expected);
+  }
+  record(std::string(p.name) + ": all WOTS endpoints match native SHAKE256", ok);
 }
 
 // ----------------------------------------------------------------- native
@@ -326,6 +355,8 @@ int main(int argc, char** argv) try {
   const bool quick = argc > 1 && std::string(argv[1]) == "--quick";
   std::printf("== SHAKE256 and the commitment tags ==\n");
   test_sponge_and_tags();
+  test_wots_endpoints(kSlhToyW4);
+  test_wots_endpoints(kSlhToyW16);
   if (!quick) {
     std::printf("\n== native SLH-DSA-SHAKE against the shared vectors ==\n");
     test_native_vectors("shake-128-24.json", SLH_SHAKE_128_24);

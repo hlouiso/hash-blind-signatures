@@ -111,6 +111,15 @@ fn circuit_accepts_exactly_valid_signatures_w16_hypertree() {
     round_trip(TOY_W16, 43);
 }
 
+#[test]
+fn zero_signers_return_a_setup_error() {
+    use blind_xmss_binius64::slh::protocol::{
+        build_slh_prover_setup_multi, build_slh_verifier_multi,
+    };
+    assert!(build_slh_prover_setup_multi(TOY_W4, 0).is_err());
+    assert!(build_slh_verifier_multi(TOY_W4, 0).is_err());
+}
+
 /// n independent keys sign one commitment; one proof covers all of them.
 #[test]
 fn multisig_accepts_exactly_the_signer_set() {

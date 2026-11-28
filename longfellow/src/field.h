@@ -18,8 +18,7 @@ using RSFactory = proofs::LCH14ReedSolomonFactory<Field>;
 using CompilerBackend = proofs::CompilerBackend<Field>;
 using LogicCircuit = proofs::Logic<Field, CompilerBackend>;
 
-constexpr size_t kPluckerSize = 3;
-constexpr size_t kXmssPluckerSize = 4;
+constexpr size_t kPluckerSize = 4;
 
 constexpr size_t kLigeroRate = 7;
 constexpr size_t kLigeroNreq = 140;

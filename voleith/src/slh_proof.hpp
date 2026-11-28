@@ -9,7 +9,7 @@ namespace voleith {
 
 // Wire version: fixes the SLH circuit, field, degree, tau and domains.
 inline constexpr std::array<uint8_t, 8> kSlhProofVersion{'H', 'B', 'V', 'S',
-                                                         'L', 'H', '0', '1'};
+                                                         'L', 'H', '0', '2'};
 
 // Parameter sets with a compiled proof system: SLH-DSA-SHAKE-128-24 and the
 // one-layer toy set.

@@ -40,7 +40,7 @@ namespace {
 using proofs::Circuit;
 using EvalBackend = proofs::EvaluationBackend<Field>;
 using EvalLogic = proofs::Logic<Field, EvalBackend>;
-using Encoder = proofs::BitPluckerEncoder<Field, kXmssPluckerSize>;
+using Encoder = proofs::BitPluckerEncoder<Field, kPluckerSize>;
 
 struct Tally {
   int pass = 0;
@@ -742,9 +742,9 @@ typename L_::template bitvec<kNodeBits> node_to_nodew(
 }
 
 template <class L_>
-typename XmssFlatSha<L_>::packed_v32
+typename StmtFlatSha<L_>::packed_v32
     eval_packed_v32(const L_& L, Encoder& enc, uint32_t v) {
-  using PV = typename XmssFlatSha<L_>::packed_v32;
+  using PV = typename StmtFlatSha<L_>::packed_v32;
   const auto elts = enc.mkpacked_v32(v);
   PV pv;
   for (size_t j = 0; j < pv.size(); ++j) pv[j] = L.konst(elts[j]);
@@ -753,7 +753,7 @@ typename XmssFlatSha<L_>::packed_v32
 
 template <class L_>
 void fill_eval_bw(
-    typename XmssFlatSha<L_>::BlockWitness& bw,
+    typename StmtFlatSha<L_>::BlockWitness& bw,
     const L_& L, Encoder& enc, const NativeBW& nbw) {
   for (size_t k = 0; k < 48; ++k) bw.outw[k] = eval_packed_v32(L, enc, nbw.outw[k]);
   for (size_t k = 0; k < 64; ++k) {
@@ -851,7 +851,7 @@ void test_word_plucker(const Field& F, Tally& t) {
   Encoder enc(F);
   EvalBackend ebk(F, false);
   EvalLogic L(&ebk, F);
-  XmssWordPlucker<EvalLogic> plucker(L);
+  ShaWordPlucker<EvalLogic> plucker(L);
   for (uint32_t v : {0x01234567u, 0x89abcdefu}) {
     const auto bits = plucker.unpack_v32(eval_packed_v32(L, enc, v));
     L.vassert_eq(bits, static_cast<uint64_t>(v));

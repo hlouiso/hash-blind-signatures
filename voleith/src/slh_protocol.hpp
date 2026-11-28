@@ -4,6 +4,7 @@
 // native/slh_commit.h, a signature on its digest d, and a VOLEitH proof of
 // slh_circuit.hpp. The XMSS protocol of protocol.hpp is untouched.
 #include <memory>
+#include <optional>
 
 #include "slh_proof.hpp"
 

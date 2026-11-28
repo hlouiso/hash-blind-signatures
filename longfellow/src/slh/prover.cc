@@ -6,7 +6,6 @@
 
 #include "arrays/dense.h"
 #include "circuits/compiler/compiler.h"
-#include "circuits/logic/bit_plucker_encoder.h"
 #include "random/secure_random_engine.h"
 #include "random/transcript.h"
 #include "util/log.h"
@@ -23,6 +22,7 @@
 #include "zstd.h"
 
 #include "circuit/slh_stmt.h"
+#include "sha_witness_encoding.h"
 #include "slh/commit.h"
 #include "slh/wide_circuit_io.h"
 
@@ -32,8 +32,6 @@ namespace {
 
 using proofs::Dense;
 using proofs::DenseFiller;
-using Encoder = proofs::BitPluckerEncoder<Field, kPluckerSize>;
-
 constexpr size_t kBlockWitnessWords = 48 + 64 + 64 + 8;
 
 // SHA-256 calls of the statement, recorded block by block.
@@ -87,12 +85,7 @@ ByteVec cat(std::initializer_list<const ByteVec*> parts) {
 ByteVec bytes_of(const Node& n) { return ByteVec(n.begin(), n.end()); }
 
 std::string domain_tag(const SlhParams& p) {
-  return std::string("blind-slh-dsa-longfellow-v1/") + p.name;
-}
-
-void push_bytes(DenseFiller<Field>& fill, const Field& F, const uint8_t* b,
-                size_t n) {
-  for (size_t i = 0; i < n; ++i) fill.push_back(static_cast<uint64_t>(b[i]), 8, F);
+  return std::string("blind-slh-dsa-longfellow-v2/") + p.name;
 }
 
 void fill_public(DenseFiller<Field>& fill, const Field& F, const SlhPublic& pub) {
@@ -111,15 +104,8 @@ void fill_all(DenseFiller<Field>& fill, const Field& F, const SlhWitness& w) {
     for (const auto& a_i : line) push_bytes(fill, F, a_i.data(), kFeBytes);
   for (const auto& b_k : w.b) push_bytes(fill, F, b_k.data(), kFeBytes);
   push_bytes(fill, F, w.sig.data(), w.sig.size());
-  Encoder enc(F);
-  for (const NativeBlock& bw : w.bw) {
-    for (size_t k = 0; k < 48; ++k) fill.push_back(enc.mkpacked_v32(bw.outw[k]));
-    for (size_t k = 0; k < 64; ++k) {
-      fill.push_back(enc.mkpacked_v32(bw.oute[k]));
-      fill.push_back(enc.mkpacked_v32(bw.outa[k]));
-    }
-    for (size_t k = 0; k < 8; ++k) fill.push_back(enc.mkpacked_v32(bw.h1[k]));
-  }
+  ShaWordEncoder enc(F);
+  for (const auto& bw : w.bw) push_block_witness(fill, enc, bw);
 }
 
 }  // namespace
@@ -232,7 +218,7 @@ size_t slh_input_count(const SlhParams& p) {
   const size_t private_bits = 8 * (kRBodyBytes + kNLines * kNNonce * kFeBytes +
                                    kNLines * kFeBytes + p.sig_bytes());
   const size_t per_block =
-      kBlockWitnessWords * proofs::BitPlucker<LogicCircuit, kPluckerSize>::kNv32Elts;
+      kBlockWitnessWords * ShaWordPlucker<LogicCircuit>::kNv32Elts;
   return slh_public_input_count() + private_bits + SlhShape(p).total() * per_block;
 }
 
@@ -269,7 +255,7 @@ std::unique_ptr<proofs::Circuit<Field>> build_slh_circuit(const Field& F,
 
 std::string slh_circuit_cache_path(const SlhParams& p, const std::string& dir) {
   // Bump the suffix whenever circuit/slh_stmt.h changes the circuit.
-  return dir + "/" + p.name + "-v1.cache";
+  return dir + "/" + p.name + "-v2.cache";
 }
 
 namespace {

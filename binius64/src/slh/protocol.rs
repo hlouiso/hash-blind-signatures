@@ -74,8 +74,8 @@ impl SlhSetup {
     }
 }
 
-fn build_circuit(p: SlhParams, n_signers: usize) -> (SlhSetup, ConstraintSystem) {
-    assert!(n_signers >= 1, "at least one signer");
+fn build_circuit(p: SlhParams, n_signers: usize) -> anyhow::Result<(SlhSetup, ConstraintSystem)> {
+    anyhow::ensure!(n_signers >= 1, "at least one SLH signer is required");
     let b = CircuitBuilder::new();
     let commit = ShaCommitGadget::new(&b, &super::commit::SLH_TAGS);
     let slh = if n_signers == 1 {
@@ -91,7 +91,7 @@ fn build_circuit(p: SlhParams, n_signers: usize) -> (SlhSetup, ConstraintSystem)
     let circuit = b.build();
     let cs = circuit.constraint_system().clone();
     assert_eq!(cs.n_inout, n_inout_slh(n_signers));
-    (
+    Ok((
         SlhSetup {
             params: p,
             circuit,
@@ -99,7 +99,7 @@ fn build_circuit(p: SlhParams, n_signers: usize) -> (SlhSetup, ConstraintSystem)
             slh,
         },
         cs,
-    )
+    ))
 }
 
 pub fn build_slh_prover_setup(p: SlhParams) -> anyhow::Result<(SlhSetup, BlindZkProver)> {
@@ -114,7 +114,7 @@ pub fn build_slh_prover_setup_multi(
     p: SlhParams,
     n_signers: usize,
 ) -> anyhow::Result<(SlhSetup, BlindZkProver)> {
-    let (setup, cs) = build_circuit(p, n_signers);
+    let (setup, cs) = build_circuit(p, n_signers)?;
     let zk_verifier = build_verifier(cs)?;
     let zk_prover = BlindZkProver::setup(&zk_verifier)?;
     Ok((setup, zk_prover))
@@ -124,7 +124,7 @@ pub fn build_slh_verifier_multi(
     p: SlhParams,
     n_signers: usize,
 ) -> anyhow::Result<BlindZkVerifier> {
-    let (_setup, cs) = build_circuit(p, n_signers);
+    let (_setup, cs) = build_circuit(p, n_signers)?;
     build_verifier(cs)
 }
 

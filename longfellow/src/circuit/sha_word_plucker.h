@@ -1,5 +1,5 @@
-#ifndef BLIND_LONGFELLOW_CIRCUIT_XMSS_WORD_PLUCKER_H_
-#define BLIND_LONGFELLOW_CIRCUIT_XMSS_WORD_PLUCKER_H_
+#ifndef BLIND_LONGFELLOW_CIRCUIT_SHA_WORD_PLUCKER_H_
+#define BLIND_LONGFELLOW_CIRCUIT_SHA_WORD_PLUCKER_H_
 
 #include <array>
 
@@ -13,13 +13,13 @@ namespace blind_longfellow {
 // GF(2^128). Each interpolated coordinate is an affine linearized polynomial
 // c0 + c1*x + c2*x^2 + c4*x^4 + c8*x^8. Share those powers across the bits.
 template <class LC>
-class XmssWordPlucker : public proofs::BitPlucker<LC, kXmssPluckerSize> {
-  using Base = proofs::BitPlucker<LC, kXmssPluckerSize>;
+class ShaWordPlucker : public proofs::BitPlucker<LC, kPluckerSize> {
+  using Base = proofs::BitPlucker<LC, kPluckerSize>;
   using EltW = typename LC::EltW;
 
  public:
-  explicit XmssWordPlucker(const LC& L) : Base(L) {
-    static_assert(kXmssPluckerSize == 4);
+  explicit ShaWordPlucker(const LC& L) : Base(L) {
+    static_assert(kPluckerSize == 4);
     for (const auto& p : this->plucker_)
       for (size_t i = 1; i < Base::kN; ++i)
         if ((i & (i - 1)) != 0)
@@ -30,7 +30,7 @@ class XmssWordPlucker : public proofs::BitPlucker<LC, kXmssPluckerSize> {
     const LC& L = this->l_;
     typename LC::v32 out;
     for (size_t j = 0; j < packed.size(); ++j) {
-      std::array<EltW, kXmssPluckerSize> powers;
+      std::array<EltW, kPluckerSize> powers;
       powers[0] = packed[j];
       for (size_t i = 1; i < powers.size(); ++i)
         powers[i] = L.mul(powers[i - 1], powers[i - 1]);

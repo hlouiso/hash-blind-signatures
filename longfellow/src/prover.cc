@@ -9,9 +9,6 @@
 
 #include "arrays/dense.h"
 #include "circuits/compiler/compiler.h"
-#include "circuits/logic/bit_plucker.h"
-#include "circuits/logic/bit_plucker_encoder.h"
-#include "circuits/sha/flatsha256_witness.h"
 #include "random/secure_random_engine.h"
 #include "random/transcript.h"
 #include "util/log.h"
@@ -25,6 +22,7 @@
 #include "field.h"
 #include "native_witness.h"
 #include "sha.h"
+#include "sha_witness_encoding.h"
 #include "wots.h"
 #include "xmss.h"
 
@@ -40,14 +38,6 @@ using proofs::Transcript;
 using proofs::ZkProof;
 using proofs::ZkProver;
 
-using Encoder = proofs::BitPluckerEncoder<Field, kXmssPluckerSize>;
-
-static void push_bytes(DenseFiller<Field>& fill, const Field& F,
-                       const uint8_t* b, size_t n) {
-  for (size_t i = 0; i < n; ++i)
-    fill.push_back(static_cast<uint64_t>(b[i]), 8, F);
-}
-
 static void push_digest(DenseFiller<Field>& fill, const Field& F,
                         const uint8_t d[kHashBytes]) {
   for (size_t j = 0; j < 256; ++j) {
@@ -62,16 +52,6 @@ static void push_node(DenseFiller<Field>& fill, const Field& F,
     const int bit = (d[kNodeBytes - 1 - i / 8] >> (i % 8)) & 1;
     fill.push_back(bit ? F.one() : F.zero());
   }
-}
-
-static void push_block_witness(DenseFiller<Field>& fill, Encoder& enc,
-                               const NativeBW& bw) {
-  for (size_t k = 0; k < 48; ++k) fill.push_back(enc.mkpacked_v32(bw.outw[k]));
-  for (size_t k = 0; k < 64; ++k) {
-    fill.push_back(enc.mkpacked_v32(bw.oute[k]));
-    fill.push_back(enc.mkpacked_v32(bw.outa[k]));
-  }
-  for (size_t k = 0; k < 8; ++k) fill.push_back(enc.mkpacked_v32(bw.h1[k]));
 }
 
 static void fill_public(DenseFiller<Field>& fill, const Field& F,
@@ -91,7 +71,7 @@ static void fill_public(DenseFiller<Field>& fill, const Field& F,
 static void fill_all(DenseFiller<Field>& fill, const Field& F,
                      const NativeWitness& nw) {
   fill_public(fill, F, nw);
-  Encoder enc(F);
+  ShaWordEncoder enc(F);
 
   for (size_t i = 0; i < kNNonce; ++i)
     push_bytes(fill, F, nw.r_bytes[i].data(), kFeBytes);

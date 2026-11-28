@@ -12,11 +12,10 @@
 #include <cstdint>
 #include <vector>
 
-#include "circuits/logic/bit_plucker.h"
 #include "circuits/sha/flatsha256_circuit.h"
 #include "util/panic.h"
 
-#include "circuit/xmss_word_plucker.h"
+#include "circuit/sha_word_plucker.h"
 #include "commitment.h"
 #include "field.h"
 #include "sha.h"
@@ -63,20 +62,16 @@ static_assert(kTreeTailLen + 9 <= 64,
 static_assert(kTreeTotalBlocks == kTreeBlocks + 1, "one block is hoisted");
 
 template <class LC>
-using StmtFlatSha =
-    proofs::FlatSHA256Circuit<LC, proofs::BitPlucker<LC, kPluckerSize>>;
+using StmtFlatSha = proofs::FlatSHA256Circuit<LC, ShaWordPlucker<LC>>;
 template <class LC>
 using StmtBW = typename StmtFlatSha<LC>::BlockWitness;
-
-template <class LC>
-using XmssFlatSha = proofs::FlatSHA256Circuit<LC, XmssWordPlucker<LC>>;
 
 template <class LC>
 struct CommitWires {
   using EltW = typename LC::EltW;
   using v8 = typename LC::v8;
   using v256 = typename LC::v256;
-  using BW = typename XmssFlatSha<LC>::BlockWitness;
+  using BW = typename StmtFlatSha<LC>::BlockWitness;
 
   std::array<v8, kYBytes> mhat;
 
@@ -103,7 +98,7 @@ template <class LC>
 struct XmssWires {
   using v8 = typename LC::v8;
   using NodeW = typename LC::template bitvec<kNodeBits>;
-  using BW = typename XmssFlatSha<LC>::BlockWitness;
+  using BW = typename StmtFlatSha<LC>::BlockWitness;
 
   NodeW xmss_root;
 
@@ -126,8 +121,8 @@ struct XmssWires {
 template <class LC>
 struct StatementWires {
   using v32 = typename LC::v32;
-  using FlatSha = XmssFlatSha<LC>;
-  using BW = typename XmssFlatSha<LC>::BlockWitness;
+  using FlatSha = StmtFlatSha<LC>;
+  using BW = typename StmtFlatSha<LC>::BlockWitness;
 
   CommitWires<LC> commit;
   SharedXmssWires<LC> shared;
@@ -310,7 +305,7 @@ typename LC::v256 assert_commit(const LC& L, const CommitWires<LC>& W,
   using v8 = typename LC::v8;
   using v256 = typename LC::v256;
   using EltW = typename LC::EltW;
-  const XmssFlatSha<LC> sha(L);
+  const StmtFlatSha<LC> sha(L);
 
   v256 com_y;
   {
@@ -361,7 +356,7 @@ void assert_xmss(const LC& L, const SharedXmssWires<LC>& S,
   using v256 = typename LC::v256;
   using NodeW = typename LC::template bitvec<kNodeBits>;
   using BitW = typename LC::BitW;
-  const XmssFlatSha<LC> sha(L);
+  const StmtFlatSha<LC> sha(L);
 
   static_assert(kXmssH <= 32, "the tree addresses bits of the 32-bit epoch");
 
